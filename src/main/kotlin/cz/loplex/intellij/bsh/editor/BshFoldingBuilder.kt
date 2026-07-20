@@ -8,10 +8,12 @@ import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import cz.loplex.intellij.bsh.psi.BshTokenTypes
+import cz.loplex.intellij.bsh.psi.BshElementTypes
 
 /**
- * Folds `{ ... }` blocks and multi-line block/doc comments. Works directly on
- * the lexer token leaves, so it does not depend on a full syntactic tree.
+ * Folds `{ ... }` blocks, multi-line block/doc comments and consecutive import
+ * statements. Brace and comment folding work on lexer leaves; import folding
+ * uses the top-level AST nodes.
  */
 class BshFoldingBuilder : FoldingBuilderEx(), DumbAware {
 
@@ -33,7 +35,46 @@ class BshFoldingBuilder : FoldingBuilderEx(), DumbAware {
                 }
             }
         }
+
+        addImportGroups(descriptors, document, root.node)
         return descriptors.toTypedArray()
+    }
+
+    /** Collapses a run of two or more consecutive import statements into one region. */
+    private fun addImportGroups(
+        target: MutableList<FoldingDescriptor>,
+        document: Document,
+        root: ASTNode,
+    ) {
+        var child = root.firstChildNode
+        while (child != null) {
+            if (child.elementType === BshElementTypes.IMPORT_DECLARATION) {
+                val first = child
+                var last = child
+                var count = 1
+                var next = child.treeNext
+                while (next != null) {
+                    if (next.elementType === BshElementTypes.IMPORT_DECLARATION) {
+                        last = next; count++
+                    } else if (next.psi is com.intellij.psi.PsiWhiteSpace || next.psi is com.intellij.psi.PsiComment) {
+                        // keep scanning across whitespace/comments
+                    } else {
+                        break
+                    }
+                    next = next.treeNext
+                }
+                if (count >= 2) {
+                    val start = first.startOffset + "import ".length
+                    val end = last.textRange.endOffset
+                    if (end > start && document.getLineNumber(start) != document.getLineNumber(end - 1)) {
+                        target += FoldingDescriptor(first, TextRange(start, end), null, "...")
+                    }
+                }
+                child = last.treeNext
+            } else {
+                child = child.treeNext
+            }
+        }
     }
 
     override fun getPlaceholderText(node: ASTNode): String = when (node.elementType) {

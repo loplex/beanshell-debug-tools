@@ -103,6 +103,9 @@
         <indexPatternBuilder
             implementation="cz.loplex.intellij.bsh.analysis.BshIndexPatternBuilder"/>
 
+        <breadcrumbsInfoProvider
+            implementation="cz.loplex.intellij.bsh.navigation.BshBreadcrumbsProvider"/>
+
         <localInspection
             language="BeanShell"
             shortName="BshUnusedVariable"

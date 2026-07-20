@@ -2,8 +2,10 @@ package cz.loplex.intellij.bsh.psi
 
 import com.intellij.extapi.psi.ASTWrapperPsiElement
 import com.intellij.lang.ASTNode
+import com.intellij.navigation.ItemPresentation
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNameIdentifierOwner
+import javax.swing.Icon
 
 /**
  * Base class for BeanShell declarations that introduce a name (classes,
@@ -24,4 +26,10 @@ abstract class BshNamedElement(node: ASTNode) : ASTWrapperPsiElement(node), PsiN
     }
 
     override fun getTextOffset(): Int = nameIdentifier?.textOffset ?: super.getTextOffset()
+
+    override fun getPresentation(): ItemPresentation = object : ItemPresentation {
+        override fun getPresentableText(): String? = name
+        override fun getLocationString(): String? = containingFile?.name
+        override fun getIcon(unused: Boolean): Icon? = this@BshNamedElement.getIcon(0)
+    }
 }

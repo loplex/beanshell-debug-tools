@@ -75,6 +75,31 @@
             language="BeanShell"
             implementationClass="cz.loplex.intellij.bsh.reference.BshNamesValidator"/>
 
+        <completion.contributor
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.completion.BshCompletionContributor"/>
+
+        <gotoSymbolContributor
+            implementation="cz.loplex.intellij.bsh.navigation.BshChooseByNameContributor"/>
+
+        <localInspection
+            language="BeanShell"
+            shortName="BshUnusedVariable"
+            displayName="Unused variable"
+            groupName="BeanShell"
+            enabledByDefault="true"
+            level="WARNING"
+            implementationClass="cz.loplex.intellij.bsh.inspection.BshUnusedVariableInspection"/>
+
+        <localInspection
+            language="BeanShell"
+            shortName="BshUnreachableCode"
+            displayName="Unreachable code"
+            groupName="BeanShell"
+            enabledByDefault="true"
+            level="WARNING"
+            implementationClass="cz.loplex.intellij.bsh.inspection.BshUnreachableCodeInspection"/>
+
         <configurationType
             implementation="cz.loplex.intellij.bsh.run.BshRunConfigurationType"/>
 

@@ -1,0 +1,56 @@
+package cz.loplex.intellij.bsh
+
+import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import cz.loplex.intellij.bsh.inspection.BshUnreachableCodeInspection
+import cz.loplex.intellij.bsh.inspection.BshUnusedVariableInspection
+import cz.loplex.intellij.bsh.navigation.BshChooseByNameContributor
+import cz.loplex.intellij.bsh.psi.BshMethodDeclaration
+
+class BshFeaturesTest : BasePlatformTestCase() {
+
+    fun testCompletionOffersKeywordsAndDeclarations() {
+        myFixture.configureByText("a.bsh", "int helper(int val) { return val; }\ncount = 5;\n<caret>")
+        myFixture.completeBasic()
+        val items = myFixture.lookupElementStrings
+        assertNotNull(items)
+        assertContainsElements(items!!, "helper", "count", "if", "while", "return")
+        // A parameter is not visible outside its method.
+        assertDoesntContain(items, "val")
+    }
+
+    fun testUnusedParameterIsReported() {
+        myFixture.configureByText("a.bsh", "int f(int used, int notUsed) { return used; }")
+        myFixture.enableInspections(BshUnusedVariableInspection())
+        val highlights = myFixture.doHighlighting()
+        assertTrue(
+            "expected an 'is never used' warning for notUsed",
+            highlights.any { it.description?.contains("notUsed") == true && it.description!!.contains("never used") },
+        )
+    }
+
+    fun testUnreachableCodeIsReported() {
+        myFixture.configureByText("a.bsh", "int f() { return 1; print(2); }")
+        myFixture.enableInspections(BshUnreachableCodeInspection())
+        val highlights = myFixture.doHighlighting()
+        assertTrue(
+            "expected an 'Unreachable code' warning",
+            highlights.any { it.description == "Unreachable code" },
+        )
+    }
+
+    fun testCrossFileMethodResolution() {
+        myFixture.addFileToProject("lib.bsh", "int shared() { return 42; }")
+        myFixture.configureByText("main.bsh", "print(<caret>shared());")
+        val target = myFixture.getReferenceAtCaretPosition()?.resolve()
+        assertTrue("resolves to a method in another file", target is BshMethodDeclaration)
+        assertEquals("lib.bsh", target!!.containingFile.name)
+    }
+
+    fun testGotoSymbolListsDeclarations() {
+        myFixture.addFileToProject("lib.bsh", "int alpha() { return 0; }\nclass Beta { }")
+        myFixture.configureByText("main.bsh", "")
+        val contributor = BshChooseByNameContributor()
+        assertContainsElements(contributor.getNames(project, false).toList(), "alpha", "Beta")
+        assertTrue(contributor.getItemsByName("alpha", "alpha", project, false).isNotEmpty())
+    }
+}

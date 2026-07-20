@@ -2,6 +2,7 @@ package cz.loplex.intellij.bsh
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import cz.loplex.intellij.bsh.inspection.BshUnreachableCodeInspection
+import cz.loplex.intellij.bsh.inspection.BshUnresolvedMethodInspection
 import cz.loplex.intellij.bsh.inspection.BshUnusedVariableInspection
 import cz.loplex.intellij.bsh.navigation.BshChooseByNameContributor
 import cz.loplex.intellij.bsh.psi.BshMethodDeclaration
@@ -65,6 +66,20 @@ class BshFeaturesTest : BasePlatformTestCase() {
         val todos = com.intellij.psi.search.PsiTodoSearchHelper.getInstance(project)
             .findTodoItems(myFixture.file)
         assertEquals(1, todos.size)
+    }
+
+    fun testUnresolvedMethodIsReportedWhenEnabled() {
+        myFixture.enableInspections(BshUnresolvedMethodInspection())
+        myFixture.configureByText("a.bsh", "doesNotExist();")
+        val highlights = myFixture.doHighlighting()
+        assertTrue(highlights.any { it.description?.contains("Cannot resolve method") == true })
+    }
+
+    fun testResolvedMethodIsNotReported() {
+        myFixture.enableInspections(BshUnresolvedMethodInspection())
+        myFixture.configureByText("a.bsh", "int ok() { return 1; }\nok();")
+        val highlights = myFixture.doHighlighting()
+        assertFalse(highlights.any { it.description?.contains("Cannot resolve method") == true })
     }
 
     fun testGotoSymbolListsDeclarations() {

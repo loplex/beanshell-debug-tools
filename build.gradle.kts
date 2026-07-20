@@ -19,6 +19,10 @@ dependencies {
         intellijIdea("2025.3.5")
         testFramework(TestFrameworkType.Platform)
 
+        // Bundled spellchecker; the spellchecking strategy is wired via an
+        // optional descriptor so the plugin still loads where it is absent.
+        bundledModule("intellij.spellchecker")
+
         // Add plugin dependencies for compilation here, for example:
         // bundledPlugin("com.intellij.java")
     }

@@ -1,0 +1,7 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <spellchecker.support
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.analysis.BshSpellcheckingStrategy"/>
+    </extensions>
+</idea-plugin>

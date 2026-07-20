@@ -4,11 +4,17 @@ import com.intellij.codeInsight.template.TemplateActionContext
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.spellchecker.tokenizer.SpellcheckingStrategy
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import cz.loplex.intellij.bsh.analysis.BshSpellcheckingStrategy
 import cz.loplex.intellij.bsh.documentation.BshDocumentationProvider
 import cz.loplex.intellij.bsh.editor.BshFoldingBuilder
+import cz.loplex.intellij.bsh.editor.BshIfSurrounder
+import cz.loplex.intellij.bsh.editor.BshSurroundDescriptor
 import cz.loplex.intellij.bsh.navigation.BshBreadcrumbsProvider
 import cz.loplex.intellij.bsh.psi.BshMethodDeclaration
+import cz.loplex.intellij.bsh.psi.BshTokenTypes
+import cz.loplex.intellij.bsh.template.BshPostfixTemplateProvider
 import cz.loplex.intellij.bsh.template.BshTemplateContextType
 
 class BshEditorFeaturesTest : BasePlatformTestCase() {
@@ -50,5 +56,37 @@ class BshEditorFeaturesTest : BasePlatformTestCase() {
         val provider = BshBreadcrumbsProvider()
         assertTrue(provider.acceptElement(method))
         assertEquals("f", provider.getElementInfo(method))
+    }
+
+    fun testSpellcheckerTokenizesComments() {
+        val file = myFixture.configureByText("a.bsh", "// note here\nx = 1;")
+        val comment = PsiTreeUtil.collectElements(file) {
+            it.node?.elementType === BshTokenTypes.LINE_COMMENT
+        }.first()
+        val tokenizer = BshSpellcheckingStrategy().getTokenizer(comment)
+        assertNotSame(SpellcheckingStrategy.EMPTY_TOKENIZER, tokenizer)
+    }
+
+    fun testSurroundWithIf() {
+        myFixture.configureByText("a.bsh", "<selection>g();</selection>")
+        val selection = myFixture.editor.selectionModel
+        val descriptor = BshSurroundDescriptor()
+        val elements = descriptor.getElementsToSurround(
+            myFixture.file, selection.selectionStart, selection.selectionEnd,
+        )
+        assertTrue("statements found to surround", elements.isNotEmpty())
+        val surrounder = descriptor.surrounders.first { it is BshIfSurrounder }
+        WriteCommandAction.runWriteCommandAction(project) {
+            surrounder.surroundElements(project, myFixture.editor, elements)
+        }
+        val text = myFixture.file.text
+        assertTrue("wrapped in if", text.contains("if ("))
+        assertTrue("kept the statement", text.contains("g();"))
+    }
+
+    fun testPostfixTemplatesRegistered() {
+        val templates = BshPostfixTemplateProvider().templates
+        assertEquals(3, templates.size)
+        assertTrue(templates.any { it.key.contains("sout") })
     }
 }

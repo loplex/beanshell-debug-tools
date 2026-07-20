@@ -25,6 +25,7 @@
     <!-- Product and plugin compatibility requirements.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="bsh-spellchecker.xml">com.intellij.modules.spellchecker</depends>
 
     <!-- Extensions defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
@@ -105,6 +106,23 @@
 
         <breadcrumbsInfoProvider
             implementation="cz.loplex.intellij.bsh.navigation.BshBreadcrumbsProvider"/>
+
+        <lang.surroundDescriptor
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.editor.BshSurroundDescriptor"/>
+
+        <codeInsight.template.postfixTemplateProvider
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.template.BshPostfixTemplateProvider"/>
+
+        <localInspection
+            language="BeanShell"
+            shortName="BshUnresolvedMethod"
+            displayName="Unresolved method call"
+            groupName="BeanShell"
+            enabledByDefault="false"
+            level="WARNING"
+            implementationClass="cz.loplex.intellij.bsh.inspection.BshUnresolvedMethodInspection"/>
 
         <localInspection
             language="BeanShell"

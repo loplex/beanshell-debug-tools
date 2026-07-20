@@ -1,4 +1,7 @@
-.gradle
-.idea
-.intellijPlatform
-build
+/.gradle/
+/.idea/
+/.intellijPlatform/
+/build/
+
+/.claude/
+.DS_Store

@@ -5,16 +5,21 @@
 
     <!-- Public plugin name should be written in Title Case.
      Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
-    <name>Bsh-plugin</name>
+    <name>BeanShell Language Support</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor url="https://www.yourcompany.com">YourCompany</vendor>
+    <vendor url="https://github.com/loplex/">loplex</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Enter short description for your plugin here.<br>
-        <em>most HTML tags may be used</em>
+        Language support for <b>BeanShell</b> scripts (<code>.bsh</code>).<br>
+        <ul>
+            <li>Syntax highlighting with a configurable color scheme</li>
+            <li>Brace matching, code folding and line/block commenting</li>
+            <li>Structural analysis: unbalanced braces, unterminated strings and comments</li>
+            <li>Run BeanShell scripts from the editor via a dedicated run configuration</li>
+        </ul>
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.

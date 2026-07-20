@@ -100,6 +100,48 @@ class BshFeaturesTest : BasePlatformTestCase() {
         assertEquals(listOf("a", "b"), hints.map { it.text })
     }
 
+    private fun detect(content: String): com.intellij.openapi.fileTypes.FileType? {
+        val file = com.intellij.testFramework.LightVirtualFile("script", content)
+        val bytes = com.intellij.openapi.util.io.ByteArraySequence(content.toByteArray())
+        return BshFileTypeDetector().detect(file, bytes, content)
+    }
+
+    fun testShebangInterpreterName() {
+        assertEquals(BshFileType, detect("#!/usr/bin/env bsh\nprint(1);"))
+    }
+
+    fun testShebangJavaInterpreter() {
+        assertEquals(BshFileType, detect("#!/usr/bin/java bsh.Interpreter\nprint(1);"))
+    }
+
+    fun testSelfExecutingPolyglotHack() {
+        val content = "#!/bin/sh\n" +
+            "// The following hack allows java to reside anywhere in the PATH.\n" +
+            "//bin/true; exec java bsh.Interpreter \"\$0\" \"\$@\"\n" +
+            "print(1);"
+        assertEquals(BshFileType, detect(content))
+    }
+
+    fun testSelfExecutingPolyglotWithBashShebang() {
+        val content = "#!/bin/bash\n//bin/true; exec java bsh.Interpreter \"\$0\" \"\$@\"\nprint(1);"
+        assertEquals(BshFileType, detect(content))
+    }
+
+    fun testSelfExecutingPolyglotWithArbitraryShebang() {
+        // The shebang target is irrelevant; only the bsh.Interpreter invocation matters.
+        val content = "#!/opt/whatever/launcher --flag\nexec java bsh.Interpreter \"\$0\"\nprint(1);"
+        assertEquals(BshFileType, detect(content))
+    }
+
+    fun testPlainShellShebangIgnored() {
+        assertNull(detect("#!/bin/sh\necho hi"))
+        assertNull(detect("#!/bin/bash\necho hi"))
+    }
+
+    fun testInterpreterMentionWithoutShebangIgnored() {
+        assertNull(detect("class X { bsh.Interpreter i; }"))
+    }
+
     fun testGotoSymbolListsDeclarations() {
         myFixture.addFileToProject("lib.bsh", "int alpha() { return 0; }\nclass Beta { }")
         myFixture.configureByText("main.bsh", "")

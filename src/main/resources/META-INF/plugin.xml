@@ -38,6 +38,8 @@
             language="BeanShell"
             extensions="bsh"/>
 
+        <fileTypeDetector implementation="cz.loplex.intellij.bsh.BshFileTypeDetector"/>
+
         <lang.parserDefinition
             language="BeanShell"
             implementationClass="cz.loplex.intellij.bsh.BshParserDefinition"/>

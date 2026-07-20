@@ -1,0 +1,19 @@
+# Maven plugins that accept an inline BeanShell script in their <configuration>.
+#
+# Format (one entry per line):
+#   <artifactId> | <propertyTag> | <direct|nested>
+#     direct = the property must be a direct child of <configuration>
+#     nested = the property may sit deeper under <configuration>
+#
+# Only artifacts that truly carry an inline BeanShell script belong here;
+# plugins that merely depend on org.beanshell:bsh transitively, or read scripts
+# from external files, must NOT be listed.
+
+# com.github.genthaler:beanshell-maven-plugin  (goal: run)
+beanshell-maven-plugin | script | direct
+
+# org.apache.maven.plugins:maven-enforcer-plugin  (rule: evaluateBeanshell)
+maven-enforcer-plugin | condition | nested
+
+# org.codehaus.mojo:build-helper-maven-plugin  (goal: bsh-property)
+build-helper-maven-plugin | source | direct

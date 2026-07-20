@@ -27,6 +27,7 @@
     <depends>com.intellij.modules.platform</depends>
     <depends optional="true" config-file="bsh-spellchecker.xml">com.intellij.modules.spellchecker</depends>
     <depends optional="true" config-file="bsh-xml.xml">com.intellij.modules.xml</depends>
+    <depends optional="true" config-file="bsh-java.xml">com.intellij.modules.java</depends>
 
     <!-- Extensions defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->

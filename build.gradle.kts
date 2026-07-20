@@ -23,6 +23,10 @@ dependencies {
         // optional descriptor so the plugin still loads where it is absent.
         bundledModule("intellij.spellchecker")
 
+        // Java plugin, used (optionally) for resolving Java classes referenced from
+        // scripts and for attaching the JVM debugger. Wired as an optional dependency.
+        bundledPlugin("com.intellij.java")
+
         // Add plugin dependencies for compilation here, for example:
         // bundledPlugin("com.intellij.java")
     }

@@ -8,6 +8,7 @@ import cz.loplex.intellij.bsh.psi.BshAmbiguousName
 import cz.loplex.intellij.bsh.psi.BshFormalParameter
 import cz.loplex.intellij.bsh.psi.BshMethodDeclaration
 import cz.loplex.intellij.bsh.psi.BshVariableDeclarator
+import cz.loplex.intellij.bsh.reference.BshJavaSupport
 import cz.loplex.intellij.bsh.reference.BshReadWriteAccessDetector
 import cz.loplex.intellij.bsh.reference.BshScopes
 
@@ -55,6 +56,18 @@ class BshReferenceTest : BasePlatformTestCase() {
         myFixture.configureByText("a.bsh", "count = 0;\nprint(<caret>count);")
         myFixture.renameElementAtCaret("total")
         myFixture.checkResult("total = 0;\nprint(total);")
+    }
+
+    fun testJavaSupportIsAvailableInIde() {
+        // The Java plugin is bundled in IntelliJ IDEA, so class navigation should be active.
+        assertTrue(BshJavaSupport.isAvailable())
+    }
+
+    fun testLocalResolutionTakesPrecedenceOverJava() {
+        // A local method named like a class must still resolve locally, not to Java.
+        myFixture.configureByText("a.bsh", "String() { return 1; }\n<caret>String();")
+        val target = myFixture.getReferenceAtCaretPosition()?.resolve()
+        assertTrue("resolves to the local method", target is BshMethodDeclaration)
     }
 
     fun testReadWriteAccessDistinguished() {

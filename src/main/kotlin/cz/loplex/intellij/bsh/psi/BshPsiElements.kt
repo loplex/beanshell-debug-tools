@@ -4,6 +4,9 @@ import com.intellij.icons.AllIcons
 import com.intellij.lang.ASTNode
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiReference
+import cz.loplex.intellij.bsh.reference.BshJavaClassReference
+import cz.loplex.intellij.bsh.reference.BshJavaResolver
+import cz.loplex.intellij.bsh.reference.BshJavaSupport
 import cz.loplex.intellij.bsh.reference.BshReference
 import cz.loplex.intellij.bsh.reference.BshResolver
 import javax.swing.Icon
@@ -36,11 +39,28 @@ class BshAmbiguousName(node: ASTNode) : BshNamedElement(node) {
 
     override fun getReference(): PsiReference? {
         val identifier = node.findChildByType(BshTokenTypes.IDENTIFIER) ?: return null
+
+        // 1. BeanShell-local resolution (methods, classes, typed/untyped variables).
         val target = BshResolver.resolve(this, identifier.text)
-        // No reference when unresolved, or when this name is itself the declaration.
-        if (target == null || target === this) return null
-        val start = identifier.startOffset - node.startOffset
-        return BshReference(this, TextRange(start, start + identifier.textLength))
+        if (target === this) return null // this name is itself the declaration
+        if (target != null) {
+            val start = identifier.startOffset - node.startOffset
+            return BshReference(this, TextRange(start, start + identifier.textLength))
+        }
+
+        // 2. Fall back to Java class navigation (Ctrl+Click into Java code).
+        if (BshJavaSupport.isAvailable()) {
+            val fullText = node.text
+            if (BshJavaResolver.resolveClass(this, fullText) != null) {
+                return BshJavaClassReference(this, TextRange(0, node.textLength), fullText)
+            }
+            val firstSegment = identifier.text
+            if (BshJavaResolver.resolveClass(this, firstSegment) != null) {
+                val start = identifier.startOffset - node.startOffset
+                return BshJavaClassReference(this, TextRange(start, start + identifier.textLength), firstSegment)
+            }
+        }
+        return null
     }
 
     override fun getIcon(flags: Int): Icon = AllIcons.Nodes.Variable

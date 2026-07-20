@@ -1,0 +1,5 @@
+<idea-plugin>
+    <!-- Loaded only when the Java plugin is present. BeanShell's optional Java
+         integration (class navigation, JVM debugger attach) is guarded in code,
+         so this descriptor intentionally declares no extensions. -->
+</idea-plugin>

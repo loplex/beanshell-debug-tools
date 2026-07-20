@@ -140,6 +140,10 @@
             <category>BeanShell</category>
         </intentionAction>
 
+        <programRunner implementation="cz.loplex.intellij.bsh.debug.BshDebugRunner"/>
+
+        <xdebugger.breakpointType implementation="cz.loplex.intellij.bsh.debug.BshLineBreakpointType"/>
+
         <localInspection
             language="BeanShell"
             shortName="BshUnusedVariable"

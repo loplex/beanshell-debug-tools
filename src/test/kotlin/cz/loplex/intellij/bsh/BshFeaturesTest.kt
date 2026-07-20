@@ -100,6 +100,14 @@ class BshFeaturesTest : BasePlatformTestCase() {
         assertEquals(listOf("a", "b"), hints.map { it.text })
     }
 
+    fun testBreakpointsAllowedOnlyInBshFiles() {
+        val bshFile = myFixture.configureByText("a.bsh", "x = 1;").virtualFile
+        val textFile = myFixture.configureByText("a.txt", "x = 1").virtualFile
+        val type = cz.loplex.intellij.bsh.debug.BshLineBreakpointType()
+        assertTrue(type.canPutAt(bshFile, 0, project))
+        assertFalse(type.canPutAt(textFile, 0, project))
+    }
+
     private fun detect(content: String): com.intellij.openapi.fileTypes.FileType? {
         val file = com.intellij.testFramework.LightVirtualFile("script", content)
         val bytes = com.intellij.openapi.util.io.ByteArraySequence(content.toByteArray())

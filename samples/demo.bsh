@@ -1,0 +1,23 @@
+// Demo BeanShell script for trying out the debugger and Java navigation.
+// - Set a breakpoint in the gutter, then run this file with the Debug button.
+// - Ctrl+Click a Java type (e.g. ArrayList) to jump into its Java source.
+
+import java.util.*;
+
+int factorial(int n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+results = new ArrayList();
+total = 0;
+for (int i = 1; i <= 5; i++) {
+    f = factorial(i);
+    results.add(f);            // Ctrl+Click ArrayList above, or step into add()
+    total = total + f;
+    print("factorial(" + i + ") = " + f);
+}
+print("values = " + results);
+print("sum of factorials = " + total);

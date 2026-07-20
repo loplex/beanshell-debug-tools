@@ -30,6 +30,7 @@ class BshUnreachableCodeInspection : LocalInspectionTool() {
                                 child.psi,
                                 "Unreachable code",
                                 ProblemHighlightType.LIKE_UNUSED_SYMBOL,
+                                BshRemoveStatementFix(),
                             )
                             return
                         }

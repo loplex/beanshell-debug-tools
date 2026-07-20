@@ -35,6 +35,7 @@ class BshUnusedVariableInspection : LocalInspectionTool() {
                         identifier,
                         "$kind '${named.name}' is never used",
                         ProblemHighlightType.LIKE_UNUSED_SYMBOL,
+                        BshRemoveDeclarationFix(),
                     )
                 }
             }

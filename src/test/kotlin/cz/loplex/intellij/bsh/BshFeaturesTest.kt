@@ -46,6 +46,27 @@ class BshFeaturesTest : BasePlatformTestCase() {
         assertEquals("lib.bsh", target!!.containingFile.name)
     }
 
+    fun testRemoveUnusedVariableQuickFix() {
+        myFixture.configureByText("a.bsh", "int f() { int <caret>tmp = 5; return 1; }")
+        myFixture.enableInspections(BshUnusedVariableInspection())
+        myFixture.launchAction(myFixture.findSingleIntention("Remove declaration"))
+        assertFalse("declaration removed", myFixture.file.text.contains("tmp"))
+    }
+
+    fun testRemoveUnreachableCodeQuickFix() {
+        myFixture.configureByText("a.bsh", "int f() { return 1; <caret>dead(); }")
+        myFixture.enableInspections(BshUnreachableCodeInspection())
+        myFixture.launchAction(myFixture.findSingleIntention("Remove unreachable code"))
+        assertFalse("unreachable statement removed", myFixture.file.text.contains("dead"))
+    }
+
+    fun testTodoInComment() {
+        myFixture.configureByText("a.bsh", "// TODO: fix this\nx = 1;")
+        val todos = com.intellij.psi.search.PsiTodoSearchHelper.getInstance(project)
+            .findTodoItems(myFixture.file)
+        assertEquals(1, todos.size)
+    }
+
     fun testGotoSymbolListsDeclarations() {
         myFixture.addFileToProject("lib.bsh", "int alpha() { return 0; }\nclass Beta { }")
         myFixture.configureByText("main.bsh", "")

@@ -96,6 +96,13 @@
 
         <defaultLiveTemplates file="liveTemplates/BeanShell"/>
 
+        <codeInsight.parameterInfo
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.completion.BshParameterInfoHandler"/>
+
+        <indexPatternBuilder
+            implementation="cz.loplex.intellij.bsh.analysis.BshIndexPatternBuilder"/>
+
         <localInspection
             language="BeanShell"
             shortName="BshUnusedVariable"

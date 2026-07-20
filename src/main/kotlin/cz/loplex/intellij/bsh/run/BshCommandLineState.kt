@@ -8,6 +8,7 @@ import com.intellij.execution.process.ProcessTerminatedListener
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.configurations.CommandLineState
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.util.execution.ParametersListUtil
 import java.io.File
 
@@ -20,6 +21,8 @@ class BshCommandLineState(
     environment: ExecutionEnvironment,
     private val configuration: BshRunConfiguration,
 ) : CommandLineState(environment) {
+
+    private val project = environment.project
 
     @Throws(ExecutionException::class)
     override fun startProcess(): ProcessHandler {
@@ -64,7 +67,7 @@ class BshCommandLineState(
     }
 
     private fun resolveJavaExecutable(): File {
-        val home = configuration.jrePath.ifBlank { System.getProperty("java.home") }
+        val home = configuration.jrePath.ifBlank { projectJdkHome() ?: System.getProperty("java.home") }
         val bin = File(home, "bin")
         val windows = File(bin, "java.exe")
         val exe = if (windows.isFile) windows else File(bin, "java")
@@ -72,6 +75,14 @@ class BshCommandLineState(
             throw ExecutionException("Java executable not found under: $home")
         }
         return exe
+    }
+
+    /** Home of the JDK configured for the project, when it provides a usable `java` launcher. */
+    private fun projectJdkHome(): String? {
+        val home = ProjectRootManager.getInstance(project).projectSdk?.homePath ?: return null
+        val bin = File(home, "bin")
+        val hasJava = File(bin, "java").isFile || File(bin, "java.exe").isFile
+        return if (hasJava) home else null
     }
 
     private fun resolveWorkingDirectory(scriptFile: File): File {

@@ -67,6 +67,14 @@
             language="BeanShell"
             implementationClass="cz.loplex.intellij.bsh.structure.BshStructureViewFactory"/>
 
+        <lang.findUsagesProvider
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.findusages.BshFindUsagesProvider"/>
+
+        <lang.namesValidator
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.reference.BshNamesValidator"/>
+
         <configurationType
             implementation="cz.loplex.intellij.bsh.run.BshRunConfigurationType"/>
 

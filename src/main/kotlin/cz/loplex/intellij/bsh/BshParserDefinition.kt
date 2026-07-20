@@ -13,8 +13,14 @@ import com.intellij.psi.tree.TokenSet
 import com.intellij.extapi.psi.ASTWrapperPsiElement
 import cz.loplex.intellij.bsh.lexer.BshLexer
 import cz.loplex.intellij.bsh.parser.BshParser
+import cz.loplex.intellij.bsh.psi.BshAmbiguousName
+import cz.loplex.intellij.bsh.psi.BshClassDeclaration
+import cz.loplex.intellij.bsh.psi.BshElementTypes
 import cz.loplex.intellij.bsh.psi.BshFile
+import cz.loplex.intellij.bsh.psi.BshFormalParameter
+import cz.loplex.intellij.bsh.psi.BshMethodDeclaration
 import cz.loplex.intellij.bsh.psi.BshTokenTypes
+import cz.loplex.intellij.bsh.psi.BshVariableDeclarator
 
 class BshParserDefinition : ParserDefinition {
     override fun createLexer(project: Project?): Lexer = BshLexer()
@@ -29,7 +35,14 @@ class BshParserDefinition : ParserDefinition {
 
     override fun getWhitespaceTokens(): TokenSet = BshTokenTypes.WHITESPACES
 
-    override fun createElement(node: ASTNode): PsiElement = ASTWrapperPsiElement(node)
+    override fun createElement(node: ASTNode): PsiElement = when (node.elementType) {
+        BshElementTypes.CLASS_DECLARATION -> BshClassDeclaration(node)
+        BshElementTypes.METHOD_DECLARATION -> BshMethodDeclaration(node)
+        BshElementTypes.VARIABLE_DECLARATOR -> BshVariableDeclarator(node)
+        BshElementTypes.FORMAL_PARAMETER -> BshFormalParameter(node)
+        BshElementTypes.AMBIGUOUS_NAME -> BshAmbiguousName(node)
+        else -> ASTWrapperPsiElement(node)
+    }
 
     override fun createFile(viewProvider: FileViewProvider): PsiFile = BshFile(viewProvider)
 

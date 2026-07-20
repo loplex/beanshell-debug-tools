@@ -7,8 +7,10 @@ import com.intellij.psi.PsiReference
 import cz.loplex.intellij.bsh.reference.BshJavaClassReference
 import cz.loplex.intellij.bsh.reference.BshJavaResolver
 import cz.loplex.intellij.bsh.reference.BshJavaSupport
+import cz.loplex.intellij.bsh.reference.BshMemberReference
 import cz.loplex.intellij.bsh.reference.BshReference
 import cz.loplex.intellij.bsh.reference.BshResolver
+import cz.loplex.intellij.bsh.reference.BshTypeInference
 import javax.swing.Icon
 
 class BshClassDeclaration(node: ASTNode) : BshNamedElement(node) {
@@ -37,30 +39,56 @@ class BshFormalParameter(node: ASTNode) : BshNamedElement(node) {
  */
 class BshAmbiguousName(node: ASTNode) : BshNamedElement(node) {
 
-    override fun getReference(): PsiReference? {
-        val identifier = node.findChildByType(BshTokenTypes.IDENTIFIER) ?: return null
+    override fun getReference(): PsiReference? = references.firstOrNull()
 
-        // 1. BeanShell-local resolution (methods, classes, typed/untyped variables).
-        val target = BshResolver.resolve(this, identifier.text)
-        if (target === this) return null // this name is itself the declaration
-        if (target != null) {
-            val start = identifier.startOffset - node.startOffset
-            return BshReference(this, TextRange(start, start + identifier.textLength))
+    /**
+     * A dotted name `a.b.c` yields several references:
+     *  - the first segment resolves to a BeanShell declaration or a Java class,
+     *  - a second segment resolves to a Java member on the first segment's type
+     *    (e.g. `list.add` → `ArrayList.add`), enabling Ctrl+Click into Java.
+     */
+    override fun getReferences(): Array<PsiReference> {
+        val identifiers = node.getChildren(null).filter { it.elementType === BshTokenTypes.IDENTIFIER }
+        if (identifiers.isEmpty()) return PsiReference.EMPTY_ARRAY
+        val first = identifiers[0]
+
+        // Whole dotted name is a Java class (FQN)? Then it's one class reference.
+        if (identifiers.size > 1 && BshJavaSupport.isAvailable() &&
+            BshResolver.resolve(this, first.text) == null &&
+            BshJavaResolver.resolveClass(this, node.text) != null
+        ) {
+            return arrayOf(BshJavaClassReference(this, rangeOf(node.startOffset, node.textLength), node.text))
         }
 
-        // 2. Fall back to Java class navigation (Ctrl+Click into Java code).
-        if (BshJavaSupport.isAvailable()) {
-            val fullText = node.text
-            if (BshJavaResolver.resolveClass(this, fullText) != null) {
-                return BshJavaClassReference(this, TextRange(0, node.textLength), fullText)
-            }
-            val firstSegment = identifier.text
-            if (BshJavaResolver.resolveClass(this, firstSegment) != null) {
-                val start = identifier.startOffset - node.startOffset
-                return BshJavaClassReference(this, TextRange(start, start + identifier.textLength), firstSegment)
+        val references = ArrayList<PsiReference>()
+
+        // First segment: BeanShell declaration, or a Java class.
+        val target = BshResolver.resolve(this, first.text)
+        when {
+            target === this -> Unit // this name is itself the declaration
+            target != null -> references.add(BshReference(this, rangeOf(first)))
+            BshJavaSupport.isAvailable() && BshJavaResolver.resolveClass(this, first.text) != null ->
+                references.add(BshJavaClassReference(this, rangeOf(first), first.text))
+        }
+
+        // Second segment: a Java member on the first segment's (variable) type.
+        if (identifiers.size >= 2 && BshJavaSupport.isAvailable()) {
+            val type = BshTypeInference.variableType(this, first.text)
+            if (type != null) {
+                references.add(BshMemberReference(this, rangeOf(identifiers[1]), type, identifiers[1].text))
             }
         }
-        return null
+        return references.toTypedArray()
+    }
+
+    private fun rangeOf(identifier: ASTNode): TextRange {
+        val start = identifier.startOffset - node.startOffset
+        return TextRange(start, start + identifier.textLength)
+    }
+
+    private fun rangeOf(start: Int, length: Int): TextRange {
+        val offset = start - node.startOffset
+        return TextRange(offset, offset + length)
     }
 
     override fun getIcon(flags: Int): Icon = AllIcons.Nodes.Variable

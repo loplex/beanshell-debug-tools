@@ -1,6 +1,7 @@
 package cz.loplex.intellij.bsh.reference
 
 import com.intellij.psi.JavaPsiFacade
+import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiElement
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
@@ -40,6 +41,13 @@ object BshJavaResolver {
             facade.findClass(candidate, scope)?.let { return it }
         }
         return null
+    }
+
+    /** Resolves a method or field named [memberName] on the Java class [typeName]. */
+    fun resolveMember(context: PsiElement, typeName: String, memberName: String): PsiElement? {
+        val psiClass = resolveClass(context, typeName) as? PsiClass ?: return null
+        psiClass.findMethodsByName(memberName, true).firstOrNull()?.let { return it }
+        return psiClass.findFieldByName(memberName, true)
     }
 
     private fun imports(context: PsiElement): List<Import> {

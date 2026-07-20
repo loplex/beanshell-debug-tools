@@ -63,6 +63,10 @@
             language="BeanShell"
             implementationClass="cz.loplex.intellij.bsh.analysis.BshAnnotator"/>
 
+        <lang.psiStructureViewFactory
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.structure.BshStructureViewFactory"/>
+
         <configurationType
             implementation="cz.loplex.intellij.bsh.run.BshRunConfigurationType"/>
 

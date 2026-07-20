@@ -7,6 +7,7 @@ import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.process.ProcessTerminatedListener
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.configurations.CommandLineState
+import com.intellij.openapi.application.PathManager
 import com.intellij.util.execution.ParametersListUtil
 import java.io.File
 
@@ -28,10 +29,11 @@ class BshCommandLineState(
         }
 
         val javaExe = resolveJavaExecutable()
+        val classpath = resolveClasspath()
 
         val commandLine = GeneralCommandLine()
             .withExePath(javaExe.absolutePath)
-            .withParameters("-cp", configuration.interpreterClasspath)
+            .withParameters("-cp", classpath)
             .withParameters(MAIN_CLASS)
             .withParameters(scriptFile.absolutePath)
             .withParameters(ParametersListUtil.parse(configuration.programArguments))
@@ -41,6 +43,24 @@ class BshCommandLineState(
         val handler = KillableColoredProcessHandler(commandLine)
         ProcessTerminatedListener.attach(handler)
         return handler
+    }
+
+    private fun resolveClasspath(): String {
+        val configured = configuration.interpreterClasspath
+        if (configured.isNotBlank()) return configured
+        return bundledBshClasspath()
+            ?: throw ExecutionException(
+                "No BeanShell classpath configured and the bundled interpreter could not be located. " +
+                    "Set the BeanShell classpath in the run configuration."
+            )
+    }
+
+    /** Locates the BeanShell jar bundled with the plugin, if present. */
+    private fun bundledBshClasspath(): String? = try {
+        val interpreter = Class.forName("bsh.Interpreter")
+        PathManager.getJarPathForClass(interpreter)
+    } catch (_: Throwable) {
+        null
     }
 
     private fun resolveJavaExecutable(): File {

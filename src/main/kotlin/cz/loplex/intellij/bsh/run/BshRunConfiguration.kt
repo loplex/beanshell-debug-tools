@@ -54,10 +54,6 @@ class BshRunConfiguration(
         if (!File(scriptPath).isFile) {
             throw RuntimeConfigurationError("Script does not exist: $scriptPath")
         }
-        if (interpreterClasspath.isBlank()) {
-            throw RuntimeConfigurationError(
-                "No BeanShell classpath set. Point it to a bsh jar or a directory containing bsh.Interpreter."
-            )
-        }
+        // A blank classpath falls back to the BeanShell interpreter bundled with the plugin.
     }
 }

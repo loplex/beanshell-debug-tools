@@ -48,7 +48,7 @@ class BshSettingsEditor : SettingsEditor<BshRunConfiguration>() {
             .addLabeledComponent("Program arguments:", programArguments)
             .addLabeledComponent("Working directory:", workingDirectory)
             .addLabeledComponent("BeanShell classpath:", interpreterClasspath)
-            .addTooltip("Path to a bsh jar or a directory that contains bsh.Interpreter")
+            .addTooltip("Leave empty to use the bundled BeanShell; or point to a bsh jar / classes directory")
             .addLabeledComponent("JRE:", jrePath)
             .addTooltip("Leave empty to use the IDE runtime")
             .panel

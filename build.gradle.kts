@@ -8,6 +8,10 @@ plugins {
 
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
+    // BeanShell interpreter, bundled into the plugin so scripts run out of the box.
+    // This is the version published to Maven Central and matches the 2.0b6 grammar.
+    implementation("org.apache-extras.beanshell:bsh:2.0b6")
+
     testImplementation(libs.junit)
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html

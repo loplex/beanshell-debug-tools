@@ -124,6 +124,19 @@
             level="WARNING"
             implementationClass="cz.loplex.intellij.bsh.inspection.BshUnresolvedMethodInspection"/>
 
+        <codeInsight.parameterNameHints
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.completion.BshInlayParameterHintsProvider"/>
+
+        <readWriteAccessDetector
+            implementation="cz.loplex.intellij.bsh.reference.BshReadWriteAccessDetector"/>
+
+        <intentionAction>
+            <language>BeanShell</language>
+            <className>cz.loplex.intellij.bsh.intention.BshIntroduceVariableIntention</className>
+            <category>BeanShell</category>
+        </intentionAction>
+
         <localInspection
             language="BeanShell"
             shortName="BshUnusedVariable"

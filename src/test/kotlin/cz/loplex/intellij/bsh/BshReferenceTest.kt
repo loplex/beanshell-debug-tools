@@ -1,11 +1,15 @@
 package cz.loplex.intellij.bsh
 
+import com.intellij.codeInsight.highlighting.ReadWriteAccessDetector
 import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import cz.loplex.intellij.bsh.psi.BshAmbiguousName
 import cz.loplex.intellij.bsh.psi.BshFormalParameter
 import cz.loplex.intellij.bsh.psi.BshMethodDeclaration
 import cz.loplex.intellij.bsh.psi.BshVariableDeclarator
+import cz.loplex.intellij.bsh.reference.BshReadWriteAccessDetector
+import cz.loplex.intellij.bsh.reference.BshScopes
 
 class BshReferenceTest : BasePlatformTestCase() {
 
@@ -51,6 +55,16 @@ class BshReferenceTest : BasePlatformTestCase() {
         myFixture.configureByText("a.bsh", "count = 0;\nprint(<caret>count);")
         myFixture.renameElementAtCaret("total")
         myFixture.checkResult("total = 0;\nprint(total);")
+    }
+
+    fun testReadWriteAccessDistinguished() {
+        val file = myFixture.configureByText("a.bsh", "count = 0;\nprint(count);")
+        val names = PsiTreeUtil.collectElementsOfType(file, BshAmbiguousName::class.java).toList()
+        val detector = BshReadWriteAccessDetector()
+        val write = names.first { BshScopes.isSimpleAssignmentTarget(it) }
+        val read = names.first { !BshScopes.isSimpleAssignmentTarget(it) && it.name == "count" }
+        assertEquals(ReadWriteAccessDetector.Access.Write, detector.getExpressionAccess(write))
+        assertEquals(ReadWriteAccessDetector.Access.Read, detector.getExpressionAccess(read))
     }
 
     fun testFindUsagesOfParameter() {

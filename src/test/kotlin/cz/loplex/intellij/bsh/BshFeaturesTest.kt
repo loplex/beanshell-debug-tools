@@ -1,10 +1,13 @@
 package cz.loplex.intellij.bsh
 
+import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import cz.loplex.intellij.bsh.completion.BshInlayParameterHintsProvider
 import cz.loplex.intellij.bsh.inspection.BshUnreachableCodeInspection
 import cz.loplex.intellij.bsh.inspection.BshUnresolvedMethodInspection
 import cz.loplex.intellij.bsh.inspection.BshUnusedVariableInspection
 import cz.loplex.intellij.bsh.navigation.BshChooseByNameContributor
+import cz.loplex.intellij.bsh.psi.BshElementTypes
 import cz.loplex.intellij.bsh.psi.BshMethodDeclaration
 
 class BshFeaturesTest : BasePlatformTestCase() {
@@ -80,6 +83,21 @@ class BshFeaturesTest : BasePlatformTestCase() {
         myFixture.configureByText("a.bsh", "int ok() { return 1; }\nok();")
         val highlights = myFixture.doHighlighting()
         assertFalse(highlights.any { it.description?.contains("Cannot resolve method") == true })
+    }
+
+    fun testIntroduceVariableIntention() {
+        myFixture.configureByText("a.bsh", "comp<caret>ute();")
+        myFixture.launchAction(myFixture.findSingleIntention("Introduce variable"))
+        myFixture.checkResult("x = compute();")
+    }
+
+    fun testParameterHints() {
+        val file = myFixture.configureByText("a.bsh", "int add(int a, int b) { return a + b; }\nadd(1, 2);")
+        val invocation = PsiTreeUtil.collectElements(file) {
+            it.node.elementType === BshElementTypes.METHOD_INVOCATION
+        }.first()
+        val hints = BshInlayParameterHintsProvider().getParameterHints(invocation)
+        assertEquals(listOf("a", "b"), hints.map { it.text })
     }
 
     fun testGotoSymbolListsDeclarations() {

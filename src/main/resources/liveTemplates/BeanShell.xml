@@ -1,0 +1,41 @@
+<templateSet group="BeanShell">
+  <template name="sout" value="print($END$);" description="print(...)" toReformat="true" toShortenFQNames="false">
+    <context>
+      <option name="BEANSHELL" value="true"/>
+    </context>
+  </template>
+  <template name="fori" value="for (int $i$ = 0; $i$ &lt; $n$; $i$++) {&#10;    $END$&#10;}" description="Iterate with an index" toReformat="true" toShortenFQNames="false">
+    <variable name="i" expression="" defaultValue="&quot;i&quot;" alwaysStopAt="true"/>
+    <variable name="n" expression="" defaultValue="&quot;n&quot;" alwaysStopAt="true"/>
+    <context>
+      <option name="BEANSHELL" value="true"/>
+    </context>
+  </template>
+  <template name="iter" value="for ($item$ : $collection$) {&#10;    $END$&#10;}" description="Iterate over a collection" toReformat="true" toShortenFQNames="false">
+    <variable name="item" expression="" defaultValue="&quot;item&quot;" alwaysStopAt="true"/>
+    <variable name="collection" expression="" defaultValue="&quot;collection&quot;" alwaysStopAt="true"/>
+    <context>
+      <option name="BEANSHELL" value="true"/>
+    </context>
+  </template>
+  <template name="ifn" value="if ($cond$) {&#10;    $END$&#10;}" description="if statement" toReformat="true" toShortenFQNames="false">
+    <variable name="cond" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="BEANSHELL" value="true"/>
+    </context>
+  </template>
+  <template name="whn" value="while ($cond$) {&#10;    $END$&#10;}" description="while loop" toReformat="true" toShortenFQNames="false">
+    <variable name="cond" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="BEANSHELL" value="true"/>
+    </context>
+  </template>
+  <template name="mdef" value="$ret$ $name$($params$) {&#10;    $END$&#10;}" description="Method declaration" toReformat="true" toShortenFQNames="false">
+    <variable name="ret" expression="" defaultValue="&quot;void&quot;" alwaysStopAt="true"/>
+    <variable name="name" expression="" defaultValue="&quot;name&quot;" alwaysStopAt="true"/>
+    <variable name="params" expression="" defaultValue="" alwaysStopAt="true"/>
+    <context>
+      <option name="BEANSHELL" value="true"/>
+    </context>
+  </template>
+</templateSet>

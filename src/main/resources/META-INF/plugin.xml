@@ -82,6 +82,20 @@
         <gotoSymbolContributor
             implementation="cz.loplex.intellij.bsh.navigation.BshChooseByNameContributor"/>
 
+        <lang.formatter
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.formatting.BshFormattingModelBuilder"/>
+
+        <lang.documentationProvider
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.documentation.BshDocumentationProvider"/>
+
+        <liveTemplateContext
+            contextId="BEANSHELL"
+            implementation="cz.loplex.intellij.bsh.template.BshTemplateContextType"/>
+
+        <defaultLiveTemplates file="liveTemplates/BeanShell"/>
+
         <localInspection
             language="BeanShell"
             shortName="BshUnusedVariable"

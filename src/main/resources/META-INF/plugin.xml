@@ -29,6 +29,45 @@
     <!-- Extensions defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
+        <fileType
+            name="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.BshFileType"
+            fieldName="INSTANCE"
+            language="BeanShell"
+            extensions="bsh"/>
+
+        <lang.parserDefinition
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.BshParserDefinition"/>
+
+        <lang.syntaxHighlighterFactory
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.highlight.BshSyntaxHighlighterFactory"/>
+
+        <colorSettingsPage
+            implementation="cz.loplex.intellij.bsh.highlight.BshColorSettingsPage"/>
+
+        <lang.braceMatcher
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.editor.BshBraceMatcher"/>
+
+        <lang.commenter
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.editor.BshCommenter"/>
+
+        <lang.foldingBuilder
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.editor.BshFoldingBuilder"/>
+
+        <annotator
+            language="BeanShell"
+            implementationClass="cz.loplex.intellij.bsh.analysis.BshAnnotator"/>
+
+        <configurationType
+            implementation="cz.loplex.intellij.bsh.run.BshRunConfigurationType"/>
+
+        <runConfigurationProducer
+            implementation="cz.loplex.intellij.bsh.run.BshRunConfigurationProducer"/>
     </extensions>
 
 </idea-plugin>

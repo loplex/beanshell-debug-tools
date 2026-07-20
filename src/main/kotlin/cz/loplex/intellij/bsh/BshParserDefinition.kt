@@ -19,6 +19,7 @@ import cz.loplex.intellij.bsh.psi.BshElementTypes
 import cz.loplex.intellij.bsh.psi.BshFile
 import cz.loplex.intellij.bsh.psi.BshFormalParameter
 import cz.loplex.intellij.bsh.psi.BshMethodDeclaration
+import cz.loplex.intellij.bsh.psi.BshPrimarySuffix
 import cz.loplex.intellij.bsh.psi.BshTokenTypes
 import cz.loplex.intellij.bsh.psi.BshVariableDeclarator
 
@@ -41,6 +42,7 @@ class BshParserDefinition : ParserDefinition {
         BshElementTypes.VARIABLE_DECLARATOR -> BshVariableDeclarator(node)
         BshElementTypes.FORMAL_PARAMETER -> BshFormalParameter(node)
         BshElementTypes.AMBIGUOUS_NAME -> BshAmbiguousName(node)
+        BshElementTypes.PRIMARY_SUFFIX -> BshPrimarySuffix(node)
         else -> ASTWrapperPsiElement(node)
     }
 

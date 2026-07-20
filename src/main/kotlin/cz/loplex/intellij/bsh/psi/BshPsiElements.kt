@@ -2,15 +2,16 @@ package cz.loplex.intellij.bsh.psi
 
 import com.intellij.icons.AllIcons
 import com.intellij.lang.ASTNode
+import com.intellij.extapi.psi.ASTWrapperPsiElement
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiReference
+import cz.loplex.intellij.bsh.reference.BshChainResolver
 import cz.loplex.intellij.bsh.reference.BshJavaClassReference
 import cz.loplex.intellij.bsh.reference.BshJavaResolver
 import cz.loplex.intellij.bsh.reference.BshJavaSupport
 import cz.loplex.intellij.bsh.reference.BshMemberReference
 import cz.loplex.intellij.bsh.reference.BshReference
 import cz.loplex.intellij.bsh.reference.BshResolver
-import cz.loplex.intellij.bsh.reference.BshTypeInference
 import javax.swing.Icon
 
 class BshClassDeclaration(node: ASTNode) : BshNamedElement(node) {
@@ -52,30 +53,36 @@ class BshAmbiguousName(node: ASTNode) : BshNamedElement(node) {
         if (identifiers.isEmpty()) return PsiReference.EMPTY_ARRAY
         val first = identifiers[0]
 
-        // Whole dotted name is a Java class (FQN)? Then it's one class reference.
-        if (identifiers.size > 1 && BshJavaSupport.isAvailable() &&
-            BshResolver.resolve(this, first.text) == null &&
-            BshJavaResolver.resolveClass(this, node.text) != null
-        ) {
-            return arrayOf(BshJavaClassReference(this, rangeOf(node.startOffset, node.textLength), node.text))
-        }
-
         val references = ArrayList<PsiReference>()
+        val (startClass, memberStart, isVariable) =
+            if (BshJavaSupport.isAvailable()) BshChainResolver.startInfo(this) else Triple(null, -1, false)
 
-        // First segment: BeanShell declaration, or a Java class.
-        val target = BshResolver.resolve(this, first.text)
         when {
-            target === this -> Unit // this name is itself the declaration
-            target != null -> references.add(BshReference(this, rangeOf(first)))
-            BshJavaSupport.isAvailable() && BshJavaResolver.resolveClass(this, first.text) != null ->
-                references.add(BshJavaClassReference(this, rangeOf(first), first.text))
+            // A Java class name spanning segments [0, memberStart): one class reference.
+            startClass != null && !isVariable -> {
+                val last = identifiers[memberStart - 1]
+                val start = first.startOffset - node.startOffset
+                val range = TextRange(start, last.startOffset - node.startOffset + last.textLength)
+                references.add(BshJavaClassReference(this, range, node.text.substring(range.startOffset, range.endOffset)))
+            }
+            // A variable receiver, or no Java type: the first segment is a BeanShell symbol.
+            else -> {
+                val target = BshResolver.resolve(this, first.text)
+                when {
+                    target === this -> Unit // this name is itself the declaration
+                    target != null -> references.add(BshReference(this, rangeOf(first)))
+                    BshJavaSupport.isAvailable() && BshJavaResolver.resolveClass(this, first.text) != null ->
+                        references.add(BshJavaClassReference(this, rangeOf(first), first.text))
+                }
+            }
         }
 
-        // Second segment: a Java member on the first segment's (variable) type.
-        if (identifiers.size >= 2 && BshJavaSupport.isAvailable()) {
-            val type = BshTypeInference.variableType(this, first.text)
-            if (type != null) {
-                references.add(BshMemberReference(this, rangeOf(identifiers[1]), type, identifiers[1].text))
+        // Remaining segments resolve to Java members via type propagation.
+        if (startClass != null) {
+            for (i in memberStart until identifiers.size) {
+                references.add(BshMemberReference(this, rangeOf(identifiers[i])) {
+                    BshChainResolver.resolveNameSegment(this, i)
+                })
             }
         }
         return references.toTypedArray()
@@ -86,10 +93,20 @@ class BshAmbiguousName(node: ASTNode) : BshNamedElement(node) {
         return TextRange(start, start + identifier.textLength)
     }
 
-    private fun rangeOf(start: Int, length: Int): TextRange {
-        val offset = start - node.startOffset
-        return TextRange(offset, offset + length)
-    }
-
     override fun getIcon(flags: Int): Icon = AllIcons.Nodes.Variable
+}
+
+/**
+ * A `.member` access after a prefix (e.g. `foo().bar`). Carries a reference into
+ * Java, resolved through static type propagation over the enclosing chain.
+ */
+class BshPrimarySuffix(node: ASTNode) : ASTWrapperPsiElement(node) {
+    override fun getReference(): PsiReference? {
+        if (!BshJavaSupport.isAvailable()) return null
+        val identifier = node.findChildByType(BshTokenTypes.IDENTIFIER) ?: return null
+        val start = identifier.startOffset - node.startOffset
+        return BshMemberReference(this, TextRange(start, start + identifier.textLength)) {
+            BshChainResolver.resolveSuffix(this)
+        }
+    }
 }

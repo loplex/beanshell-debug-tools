@@ -681,12 +681,18 @@ class BshParser : PsiParser {
 
     private fun parsePrimarySuffix(): Boolean {
         if (at(T.DOT)) {
-            consume() // .
-            when {
-                atText("class") -> consume()
-                at(T.IDENTIFIER) -> { consume(); if (at(T.LPAREN)) parseArguments() }
-                else -> b.error("identifier or 'class' expected")
+            // Field access or method call after a prefix (e.g. foo().bar) — wrapped so it
+            // can carry a reference into Java via type propagation.
+            if (lookAhead(1) === T.IDENTIFIER) {
+                val m = b.mark()
+                consume() // .
+                consume() // identifier
+                if (at(T.LPAREN)) parseArguments()
+                m.done(E.PRIMARY_SUFFIX)
+                return true
             }
+            consume() // .
+            if (atText("class")) consume() else b.error("identifier or 'class' expected")
             return true
         }
         if (at(T.LBRACKET)) {

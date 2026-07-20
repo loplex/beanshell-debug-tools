@@ -46,6 +46,7 @@ object BshElementTypes {
     @JvmField val UNARY_EXPRESSION = BshElementType("UNARY_EXPRESSION")
     @JvmField val CAST_EXPRESSION = BshElementType("CAST_EXPRESSION")
     @JvmField val PRIMARY_EXPRESSION = BshElementType("PRIMARY_EXPRESSION")
+    @JvmField val PRIMARY_SUFFIX = BshElementType("PRIMARY_SUFFIX")
     @JvmField val METHOD_INVOCATION = BshElementType("METHOD_INVOCATION")
     @JvmField val ALLOCATION_EXPRESSION = BshElementType("ALLOCATION_EXPRESSION")
     @JvmField val ARRAY_DIMENSIONS = BshElementType("ARRAY_DIMENSIONS")

@@ -2,6 +2,7 @@ package cz.loplex.intellij.bsh.reference
 
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiElement
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
@@ -46,8 +47,27 @@ object BshJavaResolver {
     /** Resolves a method or field named [memberName] on the Java class [typeName]. */
     fun resolveMember(context: PsiElement, typeName: String, memberName: String): PsiElement? {
         val psiClass = resolveClass(context, typeName) as? PsiClass ?: return null
+        return member(psiClass, memberName)
+    }
+
+    fun resolveClassPsi(context: PsiElement, name: String): PsiClass? =
+        resolveClass(context, name) as? PsiClass
+
+    /** The method or field named [memberName] on [psiClass] (methods win over fields). */
+    fun member(psiClass: PsiClass, memberName: String): PsiElement? {
         psiClass.findMethodsByName(memberName, true).firstOrNull()?.let { return it }
         return psiClass.findFieldByName(memberName, true)
+    }
+
+    /** The class produced by a member access — a method's return type or a field's type. */
+    fun memberType(psiClass: PsiClass, memberName: String): PsiClass? {
+        psiClass.findMethodsByName(memberName, true).firstOrNull()?.let {
+            return (it.returnType as? PsiClassType)?.resolve()
+        }
+        psiClass.findFieldByName(memberName, true)?.let {
+            return (it.type as? PsiClassType)?.resolve()
+        }
+        return null
     }
 
     private fun imports(context: PsiElement): List<Import> {

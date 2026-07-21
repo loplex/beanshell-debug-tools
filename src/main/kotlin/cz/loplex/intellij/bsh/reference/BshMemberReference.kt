@@ -5,8 +5,9 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiReferenceBase
 
 /**
- * Reference from a `.member` in a script to the Java method or field it names,
- * resolved (lazily) through static type propagation. See [BshChainResolver].
+ * Reference from a `.member` in a script to the method or field it names. The
+ * target is produced lazily by [resolver] — either a BeanShell class member, or
+ * a Java member found through static type propagation (see [BshChainResolver]).
  */
 class BshMemberReference(
     element: PsiElement,
@@ -14,7 +15,7 @@ class BshMemberReference(
     private val resolver: () -> PsiElement?,
 ) : PsiReferenceBase<PsiElement>(element, rangeInElement) {
 
-    override fun resolve(): PsiElement? = if (BshJavaSupport.isAvailable()) resolver() else null
+    override fun resolve(): PsiElement? = resolver()
 
     override fun handleElementRename(newElementName: String): PsiElement = element
 }

@@ -47,6 +47,19 @@ object BshResolver {
         return null
     }
 
+    /** Finds a BeanShell class declaration by name, in this file or the project. */
+    fun findClassNamed(context: PsiElement, name: String): PsiElement? {
+        namedInFile(context.containingFile, name, E.CLASS_DECLARATION).firstOrNull()?.let { return it }
+        return projectDeclaration(context, name, E.CLASS_DECLARATION)
+    }
+
+    /** A method or field named [memberName] declared inside a BeanShell class. */
+    fun classMember(classElement: PsiElement, memberName: String): PsiElement? =
+        PsiTreeUtil.collectElementsOfType(classElement, BshNamedElement::class.java).firstOrNull {
+            (it.node.elementType === E.METHOD_DECLARATION || it.node.elementType === E.VARIABLE_DECLARATOR) &&
+                it.name == memberName
+        }
+
     private fun namedInFile(file: PsiElement?, name: String, type: IElementType): List<BshNamedElement> {
         if (file == null) return emptyList()
         return PsiTreeUtil.collectElementsOfType(file, BshNamedElement::class.java)

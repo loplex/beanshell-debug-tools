@@ -12,6 +12,7 @@ import cz.loplex.intellij.bsh.reference.BshJavaSupport
 import cz.loplex.intellij.bsh.reference.BshMemberReference
 import cz.loplex.intellij.bsh.reference.BshReference
 import cz.loplex.intellij.bsh.reference.BshResolver
+import cz.loplex.intellij.bsh.reference.BshTypeInference
 import javax.swing.Icon
 
 class BshClassDeclaration(node: ASTNode) : BshNamedElement(node) {
@@ -54,6 +55,23 @@ class BshAmbiguousName(node: ASTNode) : BshNamedElement(node) {
         val first = identifiers[0]
 
         val references = ArrayList<PsiReference>()
+
+        // `receiver.member` where `receiver` is typed as a BeanShell class in the project:
+        // resolve the member to that class's own method/field (no Java involved).
+        if (identifiers.size >= 2) {
+            val receiverType = BshTypeInference.variableType(this, first.text)
+            val bshClass = if (receiverType != null) BshResolver.findClassNamed(this, receiverType) else null
+            if (bshClass != null) {
+                val target = BshResolver.resolve(this, first.text)
+                if (target != null && target !== this) references.add(BshReference(this, rangeOf(first)))
+                val member = identifiers[1]
+                references.add(BshMemberReference(this, rangeOf(member)) {
+                    BshResolver.classMember(bshClass, member.text)
+                })
+                return references.toTypedArray()
+            }
+        }
+
         val (startClass, memberStart, isVariable) =
             if (BshJavaSupport.isAvailable()) BshChainResolver.startInfo(this) else Triple(null, -1, false)
 

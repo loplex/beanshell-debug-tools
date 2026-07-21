@@ -70,6 +70,16 @@ class BshReferenceTest : BasePlatformTestCase() {
         assertTrue("resolves to the local method", target is BshMethodDeclaration)
     }
 
+    fun testBshClassMethodNavigation() {
+        myFixture.configureByText(
+            "a.bsh",
+            "class Greeter { String greet() { return \"hi\"; } }\nGreeter g = new Greeter();\ng.<caret>greet();",
+        )
+        val target = myFixture.getReferenceAtCaretPosition()?.resolve()
+        assertTrue("resolves to the BeanShell class method", target is BshMethodDeclaration)
+        assertEquals("greet", (target as PsiNamedElement).name)
+    }
+
     fun testReadWriteAccessDistinguished() {
         val file = myFixture.configureByText("a.bsh", "count = 0;\nprint(count);")
         val names = PsiTreeUtil.collectElementsOfType(file, BshAmbiguousName::class.java).toList()

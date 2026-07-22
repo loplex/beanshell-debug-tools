@@ -1,0 +1,69 @@
+/**
+ * BeanShell plugin showcase — open this file in the sandbox IDE and try:
+ *
+ *   • Syntax highlighting, code folding (fold the imports / this comment / blocks)
+ *   • Structure view (Alt+7) and breadcrumbs (enclosing method/class)
+ *   • Ctrl+Click:
+ *       - a local method/variable  -> jumps within this file
+ *       - a Java type (ArrayList)   -> jumps into java.util.ArrayList
+ *       - a chained member          -> sb.append(..).append(..), list.iterator().next()
+ *   • Rename (Shift+F6) a variable/method/parameter
+ *   • Completion (Ctrl+Space) for keywords and in-scope names
+ *   • Parameter info (Ctrl+P) inside a call's parentheses
+ *   • Debug (right-click -> Debug 'showcase.bsh'):
+ *       - breakpoints on .bsh lines, Step Over/Into/Out, Variables panel
+ *       - breakpoints in Java code you call also work (Java debug session)
+ */
+
+// Fold this import group (click the gutter arrow) and the doc comment above.
+import java.util.ArrayList;
+import java.util.List;
+
+// --- A recursive method: good for breakpoints + Step Into ------------------
+int factorial(int n) {
+    print("factorial(" + n + ")");   // trace output — shows up in the debug Console
+    if (n <= 1) {
+        return 1;
+    }
+    int sub = factorial(n - 1);      // recurse first...
+    int result = n * sub;            // ...then combine
+    return result;                   // breakpoint here: inspect n, sub, result
+}
+
+// --- A loosely typed BeanShell class ---------------------------------------
+class Greeter {
+    String name;
+
+    Greeter(String name) {
+        this.name = name;
+    }
+
+    String greet() {
+        return "Hello, " + name + "!";
+    }
+}
+
+// --- Java type + fluent chain: Ctrl+Click ArrayList / add / iterator / next -
+List numbers = new ArrayList();      // untyped var; type inferred from `new ArrayList()`
+for (int i = 1; i <= 6; i++) {
+    numbers.add(factorial(i));       // Ctrl+Click `add` -> java.util.List#add
+}
+
+first = numbers.get(0);              // Ctrl+Click `get` -> java.util.List#get
+
+// Typed variable + StringBuilder chain — Ctrl+Click each `append` walks the
+// chain into Java (append() returns StringBuilder, so the type propagates):
+StringBuilder report = new StringBuilder();
+report.append("factorials: ").append(numbers).append(" first=").append(first);
+
+// --- Control flow, operators, ternary --------------------------------------
+total = 0;
+for (int i = 0; i < numbers.size(); i++) {
+    total += numbers.get(i);
+}
+parity = (total % 2 == 0) ? "even" : "odd";
+
+Greeter greeter = new Greeter("BeanShell");
+print(greeter.greet());
+print(report.toString());
+print("sum = " + total + " (" + parity + ")");

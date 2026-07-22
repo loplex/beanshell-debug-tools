@@ -1,96 +1,154 @@
-# Bsh-plugin
+# BeanShell Language Support for IntelliJ-based IDEs
 
-[![Twitter Follow](https://img.shields.io/badge/follow-%40JBPlatform-1DA1F2?logo=twitter)](https://twitter.com/JBPlatform)
-[![Developers Forum](https://img.shields.io/badge/JetBrains%20Platform-Join-blue)][jb:forum]
+Language support for [BeanShell](https://beanshell.github.io/) scripts (`.bsh`):
+a full syntax tree, code intelligence, running, and a source-level debugger — plus
+BeanShell recognition inside Maven `pom.xml` configuration and XML in general.
 
-## Plugin structure
+The core runs in **any IntelliJ-based IDE** (IDEA, WebStorm, PyCharm, CLion, …);
+Java-aware features — navigation into Java code, variable type inference and
+JVM-debugger attach — light up in **IntelliJ IDEA** and other IDEs that bundle the
+Java plugin.
 
-A generated project contains the following content structure:
+The language model follows the
+[**BeanShell 2.0b6**](https://github.com/beanshell/beanshell/tree/2.0b6) grammar
+([`bsh.jjt`](https://github.com/beanshell/beanshell/blob/2.0b6/src/bsh/bsh.jjt)),
+which is the version published to Maven Central and bundled with the plugin for
+running scripts out of the box.
+
+> Documentation index: [Architecture](docs/ARCHITECTURE.md) ·
+> [Debugging internals](docs/DEBUGGING.md)
+
+## Features
+
+### Editing
+- **Syntax highlighting** with a configurable color scheme
+  (*Settings → Editor → Color Scheme → BeanShell*).
+- **Code folding** of `{ }` blocks, block/doc comments, and consecutive imports.
+- **Brace matching**, line/block **commenting**, and an indentation **formatter**
+  (*Reformat Code*).
+- **Structure view** (Alt+7) and **breadcrumbs** for the enclosing class/method.
+- **Read/write highlighting** of the variable under the caret.
+- **Quick documentation** (Ctrl+Q) for declarations, including a preceding
+  Javadoc-style comment.
+- **Live templates** (`sout`, `fori`, `iter`, `ifn`, `whn`, `mdef`) and
+  **postfix templates** (`.sout`, `.if`, `.while`).
+- **Surround With** (Ctrl+Alt+T): `if`, `while`, `try/catch`.
+- **TODO** highlighting inside comments.
+
+### Code intelligence
+- A **full AST parser** (recursive descent with backtracking) that mirrors the
+  BeanShell grammar and reports syntax errors as you type.
+- **Go to Declaration / Find Usages / Rename** for methods, classes, typed and
+  untyped variables, and parameters; methods and classes also resolve across the
+  project's `.bsh` files.
+- **Code completion** for keywords and in-scope names.
+- **Parameter info** (Ctrl+P) and **inlay parameter-name hints** at call sites.
+- **Inspections** with quick fixes: unused variable/parameter, unreachable code,
+  and (opt-in) unresolved method call.
+- **Introduce Variable** intention and **Go to Symbol** (Ctrl+Alt+Shift+N).
+
+### Java interoperability *(requires the Java plugin — optional)*
+- **Ctrl+Click into Java**: class names (FQN, `java.lang.*`, imported), and
+  members reached through **static type propagation** across a chain, e.g.
+  `report.append("x").append("y")` or `list.get(0)`.
+- **BeanShell class members**: `greeter.greet()` navigates to the `greet`
+  method of a `Greeter` class declared in the script.
+
+### Running
+- A **BeanShell run configuration**; right-click a `.bsh` file → *Run*.
+- The interpreter is **bundled** (`org.apache-extras.beanshell:bsh:2.0b6`), so
+  scripts run with no setup; the classpath is overridable per configuration.
+- Uses the **project JDK** when available (falls back to the IDE runtime).
+
+### Debugging
+- A **source-level debugger** for `.bsh` files: line breakpoints, a variables
+  view, and Step Over / Into / Out (see [docs/DEBUGGING.md](docs/DEBUGGING.md)).
+- With the Java plugin present, breakpoints in the **Java code** called from a
+  script are honored by a companion Java (JDWP) debug session.
+
+### File recognition & injection
+BeanShell is recognized in several ways:
+- files with the **`.bsh`** extension;
+- extensionless scripts whose **shebang** launches BeanShell, including the
+  self-executing polyglot (`#!/bin/sh` … `exec java bsh.Interpreter "$0"`);
+- inline scripts in the **`<configuration>`** of specific Maven plugins
+  (see below);
+- any XML element preceded by a **`<!--language=BeanShell-->`** comment.
+
+## Maven inline scripts
+
+Several Maven plugins accept an inline BeanShell script in their configuration.
+BeanShell is injected into those properties (in `pom.xml`) so the full tool-chain
+works inside them. The curated list lives in
+[`src/main/resources/beanshell/maven-scripts.txt`](src/main/resources/beanshell/maven-scripts.txt)
+and is easy to extend — one line per property:
 
 ```
-.
-├── .run/                   Predefined Run/Debug Configurations
-├── build/                  Output build directory
-├── gradle
-│   ├── wrapper/            Gradle Wrapper
-│   ├── libs.versions.toml  Version catalog
-├── src                     Plugin sources
-│   ├── main
-│   │   ├── kotlin/         Kotlin production sources
-│   │   └── resources/      Resources - plugin.xml, icons, messages
-├── .gitignore              Git ignoring rules
-├── build.gradle.kts        Gradle build configuration
-├── gradle.properties       Gradle configuration properties
-├── gradlew                 *nix Gradle Wrapper script
-├── gradlew.bat             Windows Gradle Wrapper script
-├── README.md               README
-└── settings.gradle.kts     Gradle project settings
+# <artifactId> | <propertyTag> | <direct|nested>
+beanshell-maven-plugin     | script    | direct
+maven-enforcer-plugin      | condition | nested
+build-helper-maven-plugin  | source    | direct
 ```
 
-In addition to the configuration files, the most crucial part is the `src` directory, which contains our implementation and the manifest for our plugin – [plugin.xml][file:plugin.xml].
+`direct` means the property is a direct child of `<configuration>`; `nested`
+allows it deeper (e.g. the enforcer's `<rules><evaluateBeanshell><condition>`).
 
-> [!NOTE]
-> To use Java in your plugin, create the `/src/main/java` directory.
+## Requirements & compatibility
 
-## Plugin configuration file
+- IntelliJ IDEA (or a compatible IDE) **2025.3**.
+- Optional, all wired so the plugin still loads when absent:
+  - **Java plugin** — Java navigation and the Java debug session;
+  - **XML** — Maven/XML injection;
+  - **Spellchecker** — spell-checking of comments and strings.
 
-The plugin configuration file is a [plugin.xml][file:plugin.xml] file located in the `src/main/resources/META-INF` directory.
-It provides general information about the plugin, its dependencies, extensions, and listeners.
+## Installation
 
-You can read more about this file in the [Plugin Configuration File][docs:plugin.xml] section of our documentation.
+- **From disk:** build the ZIP (see below), then in the IDE go to
+  *Settings → Plugins → ⚙ → Install Plugin from Disk…* and pick
+  `build/distributions/*.zip`. Restart when prompted.
+- **From source:** `./gradlew runIde` launches a sandbox IDE with the plugin
+  pre-installed.
 
-If you're still not quite sure what this is all about, read [Introduction to IntelliJ Platform][docs:intro].
+## Building & running
 
-## Predefined Run/Debug configurations
+```bash
+./gradlew buildPlugin     # build the distributable ZIP (build/distributions)
+./gradlew runIde          # launch a sandbox IDE with the plugin
+./gradlew test            # run the test suite
+```
 
-Within the default project structure, there is a `.run` directory provided containing predefined *Run/Debug configurations* that expose corresponding Gradle tasks:
+## Examples
 
-| Configuration name | Description                                                                                                                                                                         |
-|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Run Plugin         | Runs [`:runIde`][gh:intellij-platform-gradle-plugin-runIde] IntelliJ Platform Gradle Plugin task. Use the *Debug* icon for plugin debugging.                                        |
-| Run Tests          | Runs [`:check`][gradle:lifecycle-tasks] Gradle task.                                                                                                                                |
-| Run Verifications  | Runs [`:verifyPlugin`][gh:intellij-platform-gradle-plugin-verifyPlugin] IntelliJ Platform Gradle Plugin task to check the plugin compatibility against the specified IntelliJ IDEs. |
+- [`samples/showcase.bsh`](samples/showcase.bsh) — exercises most features and is
+  annotated with what to click (navigation, chains, debugging).
+- [`samples/demo.bsh`](samples/demo.bsh) — a smaller recursion + collection
+  example, handy for trying breakpoints and stepping.
 
-> [!NOTE]
-> You can find the logs from the running task in the `idea.log` tab.
+## Screenshots
 
-## Publishing the plugin
+| | |
+|---|---|
+| ![Editor](docs/images/editor.png) | ![Completion](docs/images/completion.png) |
+| Syntax highlighting & Structure view | Code completion (keywords + in-scope names) |
+| ![Navigation](docs/images/navigation.png) | ![Debugger](docs/images/debugger.png) |
+| Quick documentation into Java on a chained member | Debugger: variables + console at a breakpoint |
+| ![Maven injection](docs/images/maven-injection.png) | ![Inspection](docs/images/inspection.png) |
+| BeanShell injected into `pom.xml` | Inspection quick-fix for an unused variable |
 
-> [!TIP]
-> Make sure to follow all guidelines listed in [Publishing a Plugin][docs:publishing] to follow all recommended and required steps.
+## Known limitations
 
-Releasing a plugin to [JetBrains Marketplace](https://plugins.jetbrains.com) is a straightforward operation that uses the `publishPlugin` Gradle task provided by the [intellij-platform-gradle-plugin][gh:intellij-platform-gradle-plugin-docs].
+- The parser targets the **2.0b6** grammar; 3.0-only syntax (`**`, `??`, `<=>`,
+  triple-quoted strings, word operators such as `@gt`) is tokenized by the lexer
+  but not all of it is parsed.
+- Java navigation is **static**: it follows types that are evident in the code
+  (typed variable/parameter, `= new Type()`, class names). Generic element types,
+  array indexing and runtime-only types are not inferred.
+- On JDK 9+, BeanShell 2.0b6 cannot reflectively access some JDK-internal
+  iterators, so `list.iterator().next()` / `for (x : list)` may fail at runtime —
+  a property of the interpreter, not the plugin. Index-based iteration works.
 
-You can also upload the plugin to the [JetBrains Plugin Repository](https://plugins.jetbrains.com/plugin/upload) manually via UI.
+## License & credits
 
-## Useful links
-
-- [IntelliJ Platform SDK Plugin SDK][docs]
-- [IntelliJ Platform Gradle Plugin Documentation][gh:intellij-platform-gradle-plugin-docs]
-- [IntelliJ Platform Explorer][jb:ipe]
-- [JetBrains Marketplace Quality Guidelines][jb:quality-guidelines]
-- [IntelliJ Platform UI Guidelines][jb:ui-guidelines]
-- [JetBrains Marketplace Paid Plugins][jb:paid-plugins]
-- [IntelliJ SDK Code Samples][gh:code-samples]
-
-[docs]: https://plugins.jetbrains.com/docs/intellij
-[docs:intro]: https://plugins.jetbrains.com/docs/intellij/intellij-platform.html?from=IJPluginTemplate
-[docs:plugin.xml]: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html?from=IJPluginTemplate
-[docs:publishing]: https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html?from=IJPluginTemplate
-
-[file:plugin.xml]: ./src/main/resources/META-INF/plugin.xml
-
-[gh:code-samples]: https://github.com/JetBrains/intellij-sdk-code-samples
-[gh:intellij-platform-gradle-plugin]: https://github.com/JetBrains/intellij-platform-gradle-plugin
-[gh:intellij-platform-gradle-plugin-docs]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
-[gh:intellij-platform-gradle-plugin-runIde]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html#runIde
-[gh:intellij-platform-gradle-plugin-verifyPlugin]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html#verifyPlugin
-
-[gradle:lifecycle-tasks]: https://docs.gradle.org/current/userguide/java_plugin.html#lifecycle_tasks
-
-[jb:github]: https://github.com/JetBrains/.github/blob/main/profile/README.md
-[jb:forum]: https://platform.jetbrains.com/
-[jb:quality-guidelines]: https://plugins.jetbrains.com/docs/marketplace/quality-guidelines.html
-[jb:paid-plugins]: https://plugins.jetbrains.com/docs/marketplace/paid-plugins-marketplace.html
-[jb:ipe]: https://jb.gg/ipe
-[jb:ui-guidelines]: https://jetbrains.github.io/ui
+BeanShell is developed by the [Apache BeanShell](https://beanshell.github.io/)
+project. This plugin bundles `org.apache-extras.beanshell:bsh:2.0b6` for running
+and (optionally) resolving scripts.

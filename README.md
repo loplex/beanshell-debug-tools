@@ -149,6 +149,9 @@ allows it deeper (e.g. the enforcer's `<rules><evaluateBeanshell><condition>`).
 
 ## License & credits
 
+This plugin is licensed under the [Apache License 2.0](LICENSE).
+
 BeanShell is developed by the [Apache BeanShell](https://beanshell.github.io/)
-project. This plugin bundles `org.apache-extras.beanshell:bsh:2.0b6` for running
-and (optionally) resolving scripts.
+project. This plugin bundles `org.apache-extras.beanshell:bsh:2.0b6` (also under
+the Apache License 2.0) for running and (optionally) resolving scripts; see
+[NOTICE](NOTICE) for attribution.

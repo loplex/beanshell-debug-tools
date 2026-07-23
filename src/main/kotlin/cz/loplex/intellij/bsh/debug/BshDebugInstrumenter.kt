@@ -15,14 +15,29 @@ import cz.loplex.intellij.bsh.psi.BshElementTypes as E
  * of `{ ... }` blocks — i.e. at genuine statement boundaries — so instrumentation
  * never lands inside an expression or splits a brace-less control-flow body. Each
  * hook is simply one extra statement executed just before the original one, which
- * keeps the transformation semantics-preserving. Reported line numbers are the
- * originals, so breakpoints keep mapping correctly.
+ * keeps the transformation semantics-preserving.
+ *
+ * The line number baked into each hook is chosen by [lineFor]. For a standalone
+ * `.bsh` file it is the statement's own line, so breakpoints map directly. For an
+ * inline script injected into a pom.xml the caller bakes the **host pom.xml line**
+ * instead, so every instrumented snippet in the build reports absolute pom lines to
+ * one debug session — no per-snippet line map, no ambiguity between snippets.
  */
 object BshDebugInstrumenter {
 
     private const val HOOK = "cz.loplex.intellij.bsh.debug.agent.BshDebugAgent.step"
 
+    /** Instruments a standalone script, reporting each statement's own 1-based line. */
     fun instrument(file: BshFile): String {
+        val text = file.text
+        return instrument(file) { offset -> StringUtil.offsetToLineNumber(text, offset) + 1 }
+    }
+
+    /**
+     * Instruments [file], baking the line number returned by [lineFor] (given the statement's start
+     * offset within [file]) into each hook.
+     */
+    fun instrument(file: BshFile, lineFor: (offset: Int) -> Int): String {
         val text = file.text
         val offsets = sortedSetOf<Int>()
         collect(file.node, offsets)
@@ -31,7 +46,7 @@ object BshDebugInstrumenter {
         var prev = 0
         for (offset in offsets) {
             sb.append(text, prev, offset)
-            sb.append(HOOK).append('(').append(StringUtil.offsetToLineNumber(text, offset) + 1)
+            sb.append(HOOK).append('(').append(lineFor(offset))
                 .append(", this.namespace); ")
             prev = offset
         }

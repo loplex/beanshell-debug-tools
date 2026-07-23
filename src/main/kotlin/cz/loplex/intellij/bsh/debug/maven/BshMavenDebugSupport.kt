@@ -28,25 +28,32 @@ object BshMavenDebugSupport {
 
     /** Maven properties (`-D…`) understood by the bundled core extension / debug agent. */
     const val EXT_CLASS_PATH_PROPERTY = "maven.ext.class.path"
-    const val TARGET_PROPERTY = "bsh.debug.target"
-    const val SCRIPT_FILE_PROPERTY = "bsh.debug.script.file"
+
+    /** Path to the manifest listing every script to rewrite (`artifactId\ttag\toriginalFile\tinstrumentedFile`). */
+    const val MANIFEST_PROPERTY = "bsh.debug.manifest"
     const val CALLBACK_JAR_PROPERTY = "bsh.debug.callback.jar"
 
-    /** Everything the IDE needs to drive a session, computed from the pom.xml under read access. */
+    /**
+     * One inline BeanShell script the extension must rewrite, computed from the pom.xml under read
+     * access. Its [instrumented] text already carries **absolute pom.xml line numbers** (baked at
+     * instrumentation time), so the agent reports pom lines directly and no line map is needed.
+     */
     class Prepared(
         val pomFile: VirtualFile,
+        /** Plugin artifactId owning the script (locates the plugin whose config node is rewritten). */
+        val artifactId: String,
+        /** The configuration element name holding the script (`script`/`condition`/`source`). */
+        val tag: String,
+        /** The script as injected (used by the extension to match the right node by content). */
+        val original: String,
+        /** Instrumented script with pom.xml host lines baked into every `step(...)` call. */
         val instrumented: String,
-        /** `artifactId:tag` locating the configuration element the extension rewrites. */
-        val target: String,
-        /** 1-based snippet line -> 1-based pom.xml line. */
-        val lineMap: Map<Int, Int>,
     )
 
-    /** A socket + line map opened in getState(), awaiting the Maven process handler to start a session. */
+    /** The listening socket opened in getState(), awaiting the Maven process handler to start a session. */
     class Pending(
         val server: ServerSocket,
         val pomFile: VirtualFile,
-        val lineMap: Map<Int, Int>,
     )
 
     private val pending = ConcurrentHashMap<Long, Pending>()
@@ -58,32 +65,29 @@ object BshMavenDebugSupport {
     fun consume(executionId: Long): Pending? = pending.remove(executionId)
 
     /**
-     * Finds the first inline BeanShell script injected into [pomVFile], instruments it and builds
-     * its line map. Returns null when the pom has no inline BeanShell (the run then proceeds as a
-     * plain Maven build). Must be called under a read action.
+     * Finds every inline BeanShell script injected into [pomVFile] and instruments each with its
+     * pom.xml host lines baked in. Returns an empty list when the pom has no inline BeanShell (the
+     * run then proceeds as a plain Maven build). Must be called under a read action.
      */
-    fun prepare(project: Project, pomVFile: VirtualFile): Prepared? {
-        val psi = PsiManager.getInstance(project).findFile(pomVFile) as? XmlFile ?: return null
+    fun prepare(project: Project, pomVFile: VirtualFile): List<Prepared> {
+        val psi = PsiManager.getInstance(project).findFile(pomVFile) as? XmlFile ?: return emptyList()
         val manager = InjectedLanguageManager.getInstance(project)
-        val hostDoc = PsiDocumentManager.getInstance(project).getDocument(psi) ?: return null
+        val hostDoc = PsiDocumentManager.getInstance(project).getDocument(psi) ?: return emptyList()
 
+        val result = ArrayList<Prepared>()
         for (xmlText in PsiTreeUtil.collectElementsOfType(psi, XmlText::class.java)) {
             val host = xmlText as? PsiLanguageInjectionHost ?: continue
             val bshFile = manager.getInjectedPsiFiles(host)?.firstNotNullOfOrNull { it.first as? BshFile } ?: continue
             val tag = xmlText.parentTag ?: continue
             val artifactId = enclosingPlugin(tag)?.findFirstSubTag("artifactId")?.value?.trimmedText ?: continue
 
-            val instrumented = BshDebugInstrumenter.instrument(bshFile)
-            val injectedDoc = bshFile.viewProvider.document ?: continue
-            val lineMap = HashMap<Int, Int>()
-            for (fragmentLine in 0 until injectedDoc.lineCount) {
-                val injectedOffset = injectedDoc.getLineStartOffset(fragmentLine)
-                val hostOffset = manager.injectedToHost(bshFile, injectedOffset).coerceIn(0, hostDoc.textLength)
-                lineMap[fragmentLine + 1] = hostDoc.getLineNumber(hostOffset) + 1
+            val instrumented = BshDebugInstrumenter.instrument(bshFile) { offset ->
+                val hostOffset = manager.injectedToHost(bshFile, offset).coerceIn(0, hostDoc.textLength)
+                hostDoc.getLineNumber(hostOffset) + 1
             }
-            return Prepared(pomVFile, instrumented, "$artifactId:${tag.name}", lineMap)
+            result.add(Prepared(pomVFile, artifactId, tag.name, bshFile.text, instrumented))
         }
-        return null
+        return result
     }
 
     /**

@@ -57,9 +57,10 @@ class BshMavenRunConfiguration(
         try {
             val workDirPath = runnerParameters?.workingDirPath ?: return
             val pomFile = LocalFileSystem.getInstance().findFileByIoFile(File(workDirPath, "pom.xml")) ?: return
-            val prepared = ReadAction.compute<BshMavenDebugSupport.Prepared?, RuntimeException> {
+            val prepared = ReadAction.compute<List<BshMavenDebugSupport.Prepared>, RuntimeException> {
                 BshMavenDebugSupport.prepare(project, pomFile)
-            } ?: return  // no inline BeanShell -> proceed as a plain Maven build
+            }
+            if (prepared.isEmpty()) return  // no inline BeanShell -> proceed as a plain Maven build
 
             val callbackJar = BshLaunch.debugAgentClasspath() ?: run {
                 LOG.warn("BeanShell debug agent not found on the plugin classpath; running without BeanShell debug")
@@ -68,8 +69,17 @@ class BshMavenRunConfiguration(
 
             val server = ServerSocket(0)
             try {
-                val scriptTemp = FileUtil.createTempFile("bsh-maven-debug", ".bsh", true)
-                scriptTemp.writeText(prepared.instrumented, StandardCharsets.UTF_8)
+                // One manifest line per script: artifactId, tag, original text file, instrumented text file.
+                // The script bodies go to their own temp files so multi-line scripts survive intact.
+                val manifest = prepared.joinToString("\n") { p ->
+                    val originalTemp = FileUtil.createTempFile("bsh-maven-orig", ".bsh", true)
+                    originalTemp.writeText(p.original, StandardCharsets.UTF_8)
+                    val instrumentedTemp = FileUtil.createTempFile("bsh-maven-instr", ".bsh", true)
+                    instrumentedTemp.writeText(p.instrumented, StandardCharsets.UTF_8)
+                    listOf(p.artifactId, p.tag, originalTemp.absolutePath, instrumentedTemp.absolutePath).joinToString("\t")
+                }
+                val manifestTemp = FileUtil.createTempFile("bsh-maven-manifest", ".txt", true)
+                manifestTemp.writeText(manifest, StandardCharsets.UTF_8)
 
                 // Materialise a private runner settings on the clone before injecting our properties.
                 val settings = (runnerSettings ?: MavenRunner.getInstance(project).settings).clone()
@@ -78,16 +88,15 @@ class BshMavenRunConfiguration(
                 props[BshMavenDebugSupport.EXT_CLASS_PATH_PROPERTY] =
                     BshMavenDebugSupport.mergedExtClassPath(BshMavenExt.extensionJarPath())
                 props[BshDebugAgent.PORT_PROPERTY] = server.localPort.toString()
-                props[BshMavenDebugSupport.TARGET_PROPERTY] = prepared.target
-                props[BshMavenDebugSupport.SCRIPT_FILE_PROPERTY] = scriptTemp.absolutePath
+                props[BshMavenDebugSupport.MANIFEST_PROPERTY] = manifestTemp.absolutePath
                 props[BshMavenDebugSupport.CALLBACK_JAR_PROPERTY] = callbackJar
                 settings.setMavenProperties(props)
 
                 BshMavenDebugSupport.register(
                     environment.executionId,
-                    BshMavenDebugSupport.Pending(server, prepared.pomFile, prepared.lineMap),
+                    BshMavenDebugSupport.Pending(server, prepared.first().pomFile),
                 )
-                LOG.info("Prepared BeanShell Maven debug for ${prepared.target} on port ${server.localPort}")
+                LOG.info("Prepared BeanShell Maven debug for ${prepared.size} script(s) on port ${server.localPort}")
             } catch (e: Exception) {
                 runCatching { server.close() }
                 throw e

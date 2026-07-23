@@ -43,12 +43,12 @@ class BshMavenDebugSessionStarter : ExecutionListener {
                 null,
                 object : XDebugProcessStarter() {
                     override fun start(session: XDebugSession): XDebugProcess =
+                        // The instrumented scripts already report absolute pom.xml lines, so the
+                        // line mapper is the identity (default) and one session covers every script.
                         BshDebugProcess(
                             session, bshHandler, pending.server, pending.pomFile,
                             notifyStartOnInit = false,
-                        ) { line ->
-                            pending.lineMap[line] ?: line
-                        }
+                        )
                 },
             )
         }

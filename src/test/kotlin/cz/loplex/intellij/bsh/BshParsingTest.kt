@@ -111,4 +111,16 @@ class BshParsingTest : ParsingTestCase("", "bsh", BshParserDefinition()) {
         val file = parse("int x = ;")
         assertFalse("a missing expression should produce an error", errors(file).isEmpty())
     }
+
+    fun testTrailingExpressionWithoutSemicolonIsTheReturnValue() {
+        // BeanShell allows a final expression with no ';' as the eval/block return value
+        // (e.g. an enforcer <condition>); it must not be flagged as a parse error.
+        assertParsesCleanly("a = 1;\nb = 2;\na > b")
+        assertParsesCleanly("x = 1;\nif (x > 0) {\n    y = 2;\n    y\n}")
+    }
+
+    fun testMissingSemicolonBeforeAnotherStatementStillErrors() {
+        val file = parse("a = 1\nb = 2;")
+        assertFalse("a missing ';' before a following statement is still an error", errors(file).isEmpty())
+    }
 }

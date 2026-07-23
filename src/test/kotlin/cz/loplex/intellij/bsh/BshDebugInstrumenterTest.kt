@@ -33,6 +33,16 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
         assertTrue(instrumented.contains(".step(2, this.namespace)"))
     }
 
+    fun testHookBeforeTrailingReturnExpression() {
+        // A script ending in a bare expression (its return value, as an enforcer <condition> does)
+        // must still be instrumented and reparse cleanly.
+        val instrumented = instrument("x = 1;\nx > 0")
+        val reparsed = myFixture.configureByText("c.bsh", instrumented)
+        assertEmpty(PsiTreeUtil.collectElementsOfType(reparsed, PsiErrorElement::class.java))
+        assertTrue(instrumented.contains(".step(1, this.namespace)"))
+        assertTrue("hook before the trailing return expression", instrumented.contains(".step(2, this.namespace)"))
+    }
+
     private data class Frame(val line: Int, val depth: Int, val vars: Map<String, String>)
 
     /** End-to-end: instrumented script runs on real BeanShell and drives the agent over a socket. */

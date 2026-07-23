@@ -311,10 +311,16 @@ class BshParser : PsiParser {
         if (isKeywordText("throw")) return parseThrow()
         if (isKeywordText("try")) return parseTry()
 
-        // Statement expression: Expression ";"
+        // Statement expression: Expression ";". A trailing expression with no ';' before the end
+        // of a block or file is the block/eval return value (allowed by BeanShell, and required by
+        // e.g. an enforcer <condition>), so only demand the ';' when another statement follows.
         val m = b.mark()
         if (parseExpression()) {
-            expect(T.SEMICOLON, ";")
+            when {
+                at(T.SEMICOLON) -> consume()
+                at(T.RBRACE) || b.eof() -> {} // return-value expression; no ';' needed
+                else -> expect(T.SEMICOLON, ";")
+            }
             m.drop()
             return true
         }

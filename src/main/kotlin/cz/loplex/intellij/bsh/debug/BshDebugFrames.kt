@@ -1,10 +1,12 @@
 package cz.loplex.intellij.bsh.debug
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFileFactory
+import com.intellij.util.LocalTimeCounter
 import com.intellij.xdebugger.XDebuggerUtil
 import com.intellij.xdebugger.XExpression
 import com.intellij.xdebugger.XSourcePosition
@@ -73,7 +75,12 @@ class BshDebuggerEditorsProvider : XDebuggerEditorsProvider() {
         expression: XExpression,
         sourcePosition: XSourcePosition?,
         mode: EvaluationMode,
-    ) = PsiDocumentManager.getInstance(project).getDocument(
-        PsiFileFactory.getInstance(project).createFileFromText("fragment.bsh", BshFileType, expression.expression),
-    )!!
+    ): Document {
+        // eventSystemEnabled = true so the fragment gets a real backing Document; a light
+        // (event-system-disabled) file yields a null document and NPEs the watches/evaluate UI.
+        val fragment = PsiFileFactory.getInstance(project).createFileFromText(
+            "fragment.bsh", BshFileType, expression.expression, LocalTimeCounter.currentTime(), true,
+        )
+        return PsiDocumentManager.getInstance(project).getDocument(fragment)!!
+    }
 }

@@ -35,6 +35,17 @@ with one pure-Java class (the debug agent). Targets IntelliJ IDEA **2025.3**.
   `src/main/resources/beanshell/maven-scripts.txt` (`artifactId | tag | direct|nested`).
 - All feature EPs are registered in `src/main/resources/META-INF/plugin.xml`.
 
+## Commit messages
+
+- **Imperative, capitalized subject, no type prefixes.** Match the existing history:
+  `Add …`, `Debug …`, `Generalize …`. Do **not** use Conventional Commits
+  (`feat:`/`fix:`) — that only pays off with release tooling this repo doesn't have.
+- **A bugfix starts with the verb `Fix …`** (e.g. `Fix "';' expected" on a trailing
+  return expression`). That flags the fix within the same verb-first style, without a
+  `fix:` tag.
+- **No `Co-Authored-By` trailer.** The maintainer reviews and edits every commit before
+  pushing.
+
 ## Testing notes
 
 - PSI/feature tests extend `BasePlatformTestCase`; pure logic (lexer, step logic)

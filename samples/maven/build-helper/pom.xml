@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Inline BeanShell inside the build-helper-maven-plugin's bsh-property goal (<source>).
+  The <source> is a BeanShell expression whose value is stored into the named property.
+  The mojo binds a `project` variable, so it can be referenced directly. Set a breakpoint
+  on a line below and run the "bsh-property" goal in Debug.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example.bsh</groupId>
+    <artifactId>build-helper</artifactId>
+    <version>1.0.0</version>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>compute-timestamp</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>bsh-property</goal>
+                        </goals>
+                        <configuration>
+                            <source><![CDATA[
+                                prefix = project.getArtifactId();
+                                count = project.getVersion().length();
+                                buildTag = prefix + "-" + count;
+                            ]]></source>
+                            <properties>
+                                <property>buildTag</property>
+                            </properties>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Two inline BeanShell scripts in one build, each in its own execution of the genthaler
+  beanshell-maven-plugin. This exercises multi-script debugging: put a breakpoint in BOTH
+  <script> blocks, launch in Debug, and a single "BeanShell (Maven)" tab stops in each one
+  at the correct pom.xml line (the debugger bakes the pom line into every step, so one
+  session covers every inline script in the build).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example.bsh</groupId>
+    <artifactId>multi-script</artifactId>
+    <version>1.0.0</version>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.github.genthaler</groupId>
+                <artifactId>beanshell-maven-plugin</artifactId>
+                <version>1.4</version>
+                <executions>
+                    <execution>
+                        <id>first</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <script><![CDATA[
+                                a = 1;
+                                b = 2;
+                                print("first script: " + (a + b));
+                            ]]></script>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>second</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <script><![CDATA[
+                                items = new java.util.ArrayList();
+                                for (int i = 0; i < 3; i++) {
+                                    items.add("item-" + i);
+                                }
+                                print("second script: " + items);
+                            ]]></script>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

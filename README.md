@@ -124,6 +124,18 @@ allows it deeper (e.g. the enforcer's `<rules><evaluateBeanshell><condition>`).
 - [`samples/demo.bsh`](samples/demo.bsh) — a smaller recursion + collection
   example, handy for trying breakpoints and stepping.
 
+Inline BeanShell inside a `pom.xml`, for debugging a script as a real Maven build
+runs it (create a "bsh-enhanced Run Configuration" from the Maven tool window and
+launch it in Debug):
+
+- [`samples/maven/beanshell-run`](samples/maven/beanshell-run) — a single inline
+  `<script>` run by the genthaler beanshell-maven-plugin.
+- [`samples/maven/multi-script`](samples/maven/multi-script) — two inline scripts
+  in one build; a single BeanShell debug tab stops in each at the right pom line.
+- [`samples/maven/enforcer`](samples/maven/enforcer) and
+  [`samples/maven/build-helper`](samples/maven/build-helper) — the enforcer
+  `<condition>` and build-helper `<source>` forms.
+
 ## Screenshots
 
 | | |

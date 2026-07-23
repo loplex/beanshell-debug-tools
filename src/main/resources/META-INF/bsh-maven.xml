@@ -1,0 +1,27 @@
+<idea-plugin>
+    <!-- Loaded only when the IntelliJ Maven plugin is present. Provides the
+         BeanShell-enhanced Maven run configuration (a subclass of MavenRunConfiguration)
+         that debugs the inline BeanShell <script> blocks executed by the build. -->
+    <extensions defaultExtensionNs="com.intellij">
+        <configurationType
+            implementation="cz.loplex.intellij.bsh.debug.maven.BshMavenRunConfigurationType"/>
+    </extensions>
+
+    <!-- Starts the BeanShell XDebug session once the Maven process (launched by a
+         BshMavenRunConfiguration in Debug) is running. -->
+    <applicationListeners>
+        <listener class="cz.loplex.intellij.bsh.debug.maven.BshMavenDebugSessionStarter"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </applicationListeners>
+
+    <!-- "Create bsh-enhanced Run Configuration" next to Maven's own, in the tool-window
+         goal/phase context menu (Maven.BuildMenu). -->
+    <actions>
+        <action id="Bsh.CreateMavenRunConfiguration"
+                class="cz.loplex.intellij.bsh.debug.maven.BshMavenCreateRunConfigurationAction"
+                text="Create bsh-enhanced Run Configuration"
+                description="Create a Maven run configuration that also debugs inline BeanShell scripts">
+            <add-to-group group-id="Maven.BuildMenu" anchor="after" relative-to-action="Maven.CreateRunConfiguration"/>
+        </action>
+    </actions>
+</idea-plugin>

@@ -27,8 +27,10 @@ dependencies {
         // scripts and for attaching the JVM debugger. Wired as an optional dependency.
         bundledPlugin("com.intellij.java")
 
-        // Add plugin dependencies for compilation here, for example:
-        // bundledPlugin("com.intellij.java")
+        // Maven plugin, used (optionally) for the BeanShell-enhanced Maven run
+        // configuration that debugs inline <script> blocks. Wired as an optional
+        // dependency (bsh-maven.xml) so the plugin still loads where Maven is absent.
+        bundledPlugin("org.jetbrains.idea.maven")
     }
 }
 

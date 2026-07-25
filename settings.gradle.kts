@@ -1,6 +1,11 @@
 import org.jetbrains.intellij.platform.gradle.extensions.intellijPlatform
 
-rootProject.name = "intellij-beanshell"
+// The root project is a container only: it carries the wrapper, the version catalog
+// and the build-wide properties, and holds no sources of its own. Every deliverable is
+// a subproject, so `settings.gradle.kts` lives here rather than next to the plugin.
+rootProject.name = "bsh-plugin"
+
+include(":plugin")
 
 pluginManagement {
     plugins {

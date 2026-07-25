@@ -27,7 +27,7 @@ two terminals:
 ./tools/mock-ide.py 47784
 
 # Terminal 2 — instrument + run, wired to that port
-./gradlew compileJava                       # once: builds BshDebugAgent into build/
+../gradlew :plugin:compileJava              # once: builds BshDebugAgent into build/
 ./tools/run-debug-bsh.sh 47784 < samples/showcase.bsh
 ```
 

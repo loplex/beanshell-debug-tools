@@ -9,7 +9,7 @@ differ every run; discover them dynamically as shown.
 
 ## Demo project layout
 
-- Sandbox IDE runs `./gradlew runIde` with the project `~/beanshell-demo` open.
+- Sandbox IDE runs `./gradlew :plugin:runIde` with the project `~/beanshell-demo` open.
 - `~/beanshell-demo/samples` is a **symlink** to this repo's `samples/`, so the
   showcase file is edited here but the IDE sees it at
   `~/beanshell-demo/samples/showcase.bsh`. **This symlink matters for breakpoints

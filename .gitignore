@@ -1,7 +1,8 @@
-/.gradle/
+.gradle/
 /.idea/
-/.intellijPlatform/
+.intellijPlatform/
 /build/
+/plugin/build/
 
 /.claude/
 .DS_Store

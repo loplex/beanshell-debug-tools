@@ -34,6 +34,14 @@ dependencies {
     }
 }
 
+// The Gradle project is named after its directory, so the distribution would be
+// `plugin-<version>.zip`. Name it for the plugin instead. Deliberately not done through
+// `intellijPlatform.pluginConfiguration.name`, which would also rewrite <name> in
+// plugin.xml — the name shown on the Marketplace.
+tasks.named<Zip>("buildPlugin") {
+    archiveBaseName.set("intellij-beanshell")
+}
+
 // --- Maven core extension (Core-2) -----------------------------------------------
 // A standalone, JDK-only jar shipped *inside* the plugin and dropped onto Maven's
 // `-Dmaven.ext.class.path` when debugging an inline BeanShell <script> in a pom.xml.

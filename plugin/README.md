@@ -105,16 +105,18 @@ allows it deeper (e.g. the enforcer's `<rules><evaluateBeanshell><condition>`).
 
 - **From disk:** build the ZIP (see below), then in the IDE go to
   *Settings → Plugins → ⚙ → Install Plugin from Disk…* and pick
-  `build/distributions/*.zip`. Restart when prompted.
-- **From source:** `./gradlew runIde` launches a sandbox IDE with the plugin
+  `plugin/build/distributions/*.zip`. Restart when prompted.
+- **From source:** `./gradlew :plugin:runIde` launches a sandbox IDE with the plugin
   pre-installed.
 
 ## Building & running
 
+Run from the repository root — the plugin is the `:plugin` subproject:
+
 ```bash
-./gradlew buildPlugin     # build the distributable ZIP (build/distributions)
-./gradlew runIde          # launch a sandbox IDE with the plugin
-./gradlew test            # run the test suite
+./gradlew :plugin:buildPlugin   # build the distributable ZIP (plugin/build/distributions)
+./gradlew :plugin:runIde        # launch a sandbox IDE with the plugin
+./gradlew :plugin:test          # run the test suite
 ```
 
 ## Examples

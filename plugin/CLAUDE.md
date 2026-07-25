@@ -11,11 +11,15 @@ with one pure-Java class (the debug agent). Targets IntelliJ IDEA **2025.3**.
 
 ## Commands
 
+The plugin is the `:plugin` subproject of the repository-wide Gradle build, so the
+wrapper lives one directory up and every task is addressed by path. Run these from the
+**repository root**:
+
 ```bash
-./gradlew compileKotlin   # fast compile check
-./gradlew test            # test suite (BasePlatformTestCase + plain unit tests)
-./gradlew buildPlugin     # distributable ZIP -> build/distributions
-./gradlew runIde          # sandbox IDE (GUI)
+./gradlew :plugin:compileKotlin   # fast compile check
+./gradlew :plugin:test            # test suite (BasePlatformTestCase + plain unit tests)
+./gradlew :plugin:buildPlugin     # distributable ZIP -> plugin/build/distributions
+./gradlew :plugin:runIde          # sandbox IDE (GUI)
 ```
 
 ## Key conventions & gotchas

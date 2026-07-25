@@ -7,8 +7,11 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.Socket;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -22,10 +25,12 @@ import java.util.Set;
  * BeanShell type (the bootstrap loader cannot see them), hence {@code Object} parameters and
  * reflection throughout. Configuration arrives through system properties for the same reason.
  *
- * <p>Wire format is unchanged from the script-rewriting agent it replaces, so the IDE side needs
- * no modification: per reported statement it writes {@code line}, {@code depth},
- * {@code variableCount} and then {@code name}/{@code value} pairs, and blocks on a single
- * response byte. Failure handling matches too — see {@link #onEval}.
+ * <p>The outbound wire format is unchanged from the script-rewriting agent this replaces, so an
+ * unmodified IDE keeps working: per reported statement it writes {@code line}, {@code depth},
+ * {@code variableCount} and then {@code name}/{@code value} pairs, then blocks for a response.
+ * The return channel gained optional commands — see {@link #CMD_RESUME} and friends — but the
+ * single {@code 0x01} byte the old IDE sends still means "resume", and an IDE that sends nothing
+ * else gets exactly the old behaviour. Failure handling matches too, see {@link #onEval}.
  */
 public final class BshHook {
 
@@ -102,6 +107,39 @@ public final class BshHook {
     private static final String ENHANCED_FOR_STATEMENT = "BSHEnhancedForStatement";
     private static final String SWITCH_STATEMENT = "BSHSwitchStatement";
     private static final String BLOCK = "BSHBlock";
+
+    /*
+     * Commands the IDE may send on the return channel.
+     *
+     * The original protocol had the IDE reply with a single byte to release a reported statement.
+     * That byte is now RESUME, and any number of other commands may precede it, so an IDE that
+     * only ever sends 0x01 keeps working unchanged.
+     *
+     * Until the IDE sends SET_BREAKPOINTS at least once every statement is reported, because an
+     * older IDE that configures nothing must not go blind. Once it does, the agent falls silent
+     * while running and speaks up only at a breakpoint, which removes the round-trip per
+     * statement that made a plain loop crawl.
+     */
+    private static final int CMD_RESUME = 0x01;
+    private static final int CMD_SET_BREAKPOINTS = 0x02;
+    private static final int CMD_SET_RUN_MODE = 0x03;
+
+    /** Not stepping. Any other mode means the IDE wants to see every statement. */
+    private static final int MODE_RUN = 0;
+
+    /**
+     * Breakpoint lines mapped to the source-file suffixes they apply to. Keyed by line because
+     * that is the cheap discriminator — almost no statement shares a line with a breakpoint, so
+     * the string comparison runs only on the rare hit. Null until the IDE configures it.
+     */
+    private static Map<Integer, List<String>> breakpointsByLine;
+
+    /**
+     * Anything other than {@link #MODE_RUN} means the user is stepping, so every statement is
+     * reported and the IDE decides. Stepping is interactive and a round-trip there is invisible;
+     * running is what needed fixing.
+     */
+    private static int runMode = MODE_RUN;
 
     /**
      * Guards against re-entering the interpreter. Reading variables — and, later, evaluating
@@ -211,6 +249,12 @@ public final class BshHook {
                         + " src=" + shortSource(sourceFile));
                 return;
             }
+            if (!shouldReport(sourceFile, line)) {
+                // Still let the IDE change its mind mid-run, e.g. when the user adds a
+                // breakpoint while the script is running.
+                drainPendingCommands();
+                return;
+            }
             report(line, callstack);
         } catch (Throwable t) {
             // Never let a debugging problem change the behaviour of the debugged script.
@@ -295,6 +339,103 @@ public final class BshHook {
         return dot < 0 ? name : name.substring(dot + 1);
     }
 
+    /**
+     * Whether this statement is worth a round-trip to the IDE.
+     *
+     * <p>Reports while stepping, at a configured breakpoint, or as long as the IDE has never
+     * configured any breakpoints — the last case is what keeps an IDE speaking only the original
+     * one-byte protocol fully functional.
+     */
+    private static boolean shouldReport(String sourceFile, int line) {
+        Map<Integer, List<String>> configured = breakpointsByLine;
+        if (configured == null || runMode != MODE_RUN) {
+            return true;
+        }
+        List<String> files = configured.get(Integer.valueOf(line));
+        if (files == null) {
+            return false;
+        }
+        if (sourceFile == null) {
+            return false;
+        }
+        for (int i = 0; i < files.size(); i++) {
+            if (sourceFile.endsWith(files.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Consumes any commands the IDE has already sent, without waiting for more.
+     *
+     * <p>Checking {@code available()} outside the lock is a benign race: losing it only means
+     * entering the lock and finding nothing to read.
+     */
+    private static void drainPendingCommands() {
+        try {
+            if (socket == null || in.available() <= 0) {
+                return;
+            }
+            synchronized (LOCK) {
+                while (in.available() > 0) {
+                    if (readCommand() == CMD_RESUME) {
+                        // A stray resume with nothing suspended; nothing to release.
+                        return;
+                    }
+                }
+            }
+        } catch (IOException ex) {
+            System.err.println("[bsh-agent] debug session disconnected; continuing without debugging");
+            disabled = true;
+            close();
+        }
+    }
+
+    /** Blocks until the IDE releases this statement, applying any commands sent first. */
+    private static void readCommandsUntilResume() throws IOException {
+        while (readCommand() != CMD_RESUME) {
+            // keep applying commands
+        }
+    }
+
+    /** Reads and applies one command, returning its opcode. Caller holds {@link #LOCK}. */
+    private static int readCommand() throws IOException {
+        int command = in.readByte() & 0xFF;
+        switch (command) {
+            case CMD_SET_BREAKPOINTS:
+                readBreakpoints();
+                break;
+            case CMD_SET_RUN_MODE:
+                runMode = in.readByte() & 0xFF;
+                break;
+            default:
+                // RESUME, and anything unrecognised, which a future IDE must not be able to
+                // wedge the agent with. Treating it as a release is the safe reading: the worst
+                // case is a script that keeps running.
+                break;
+        }
+        return command;
+    }
+
+    private static void readBreakpoints() throws IOException {
+        int count = in.readInt();
+        Map<Integer, List<String>> parsed = new HashMap<Integer, List<String>>();
+        for (int i = 0; i < count; i++) {
+            String file = in.readUTF();
+            int line = in.readInt();
+            Integer key = Integer.valueOf(line);
+            List<String> files = parsed.get(key);
+            if (files == null) {
+                files = new ArrayList<String>(2);
+                parsed.put(key, files);
+            }
+            files.add(file);
+        }
+        // Published as a whole so a concurrent shouldReport() never sees a half-built map.
+        breakpointsByLine = parsed;
+    }
+
     /** Applies the {@link #SOURCES_PROPERTY} filter; no filter configured means report all. */
     private static boolean isReportedSource(String sourceFile) {
         if (sources == null) {
@@ -344,7 +485,7 @@ public final class BshHook {
                     out.writeUTF(entry.getValue());
                 }
                 out.flush();
-                in.readByte(); // block until the IDE resumes this step
+                readCommandsUntilResume();
             } catch (IOException ex) {
                 System.err.println("[bsh-agent] debug session disconnected; continuing without debugging");
                 disabled = true;

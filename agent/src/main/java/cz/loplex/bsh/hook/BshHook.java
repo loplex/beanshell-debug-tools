@@ -4,6 +4,7 @@ import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.Socket;
 import java.util.Arrays;
@@ -62,25 +63,45 @@ public final class BshHook {
     private static final int EXIT_DEBUG_UNAVAILABLE = 69;
 
     /**
-     * AST nodes all of whose children sit at statement position.
-     *
-     * <p>Matched by simple name rather than by type, to stay version-independent.
-     *
-     * <p>Only {@code BSHBlock} qualifies, and the restriction is deliberate. Control-flow nodes
-     * do contain statements, but they mix them with their header: the children of a
-     * {@code BSHForStatement} are the init list, the condition, the update list <i>and</i> the
-     * body, all reporting the line of the {@code for} keyword. Treating every child of a
-     * container as a statement therefore fires once per header part on every iteration. Telling
-     * body from header needs per-node child-index knowledge, which is exactly the
-     * version-specific coupling this agent avoids.
-     *
-     * <p>The cost is that a brace-less body ({@code if (x) foo();}) and the statements of a
-     * {@code switch} are not stoppable. That matches the script-rewriting instrumenter, whose
-     * pure-insertion test rejects those same positions, so this is parity rather than a
-     * regression — see the TODO in {@link #isStatement}.
+     * Nodes that are containers rather than step positions, so they are never reported in their
+     * own right: {@code BSHBlock} would add a stop on the {@code {} of every braced body, and
+     * {@code BSHSwitchLabel} is a {@code case} label, not a statement.
      */
-    private static final Set<String> STATEMENT_CONTAINERS = new HashSet<String>(Arrays.asList(
-            "BSHBlock"));
+    private static final Set<String> NEVER_REPORTED = new HashSet<String>(Arrays.asList(
+            "BSHBlock",
+            "BSHSwitchLabel"));
+
+    /*
+     * Which children of a control-flow node sit at statement position.
+     *
+     * A container's children mix statements with its header, so "child of a container" is not the
+     * same as "statement". The layouts below were read off the parse trees rather than assumed:
+     *
+     *     BSHIfStatement            [cond, then, else?]        statements at index >= 1
+     *     BSHWhileStatement while   [cond, body]               statement is last
+     *     BSHWhileStatement do      [body, cond]               statement is FIRST
+     *     BSHForStatement           [init?, cond?, update?, body]   statement is last
+     *     BSHEnhancedForStatement   [type?, iterable, body]    statement is last
+     *     BSHSwitchStatement        [expr, label, stmt, ...]   statements at index >= 1
+     *
+     * Two traps are worth naming. `do` and `while` are the same node type — the grammar declares
+     * DoStatement() as #WhileStatement — but their children are in opposite order, so "last
+     * child" is wrong for `do`; they are told apart by the package-private isDoStatement field.
+     * And the optional parts of `for` and the optional type of an enhanced `for` change the child
+     * count, which is why those rules are expressed relative to the end rather than as fixed
+     * indices.
+     *
+     * This is per-node-type knowledge, which the transformer deliberately avoids — but here it
+     * degrades gracefully. An unrecognised container simply reports none of its direct children,
+     * exactly as before this rule existed, so a future BeanShell that renames or reshapes a node
+     * loses brace-less-body coverage instead of misbehaving.
+     */
+    private static final String IF_STATEMENT = "BSHIfStatement";
+    private static final String WHILE_STATEMENT = "BSHWhileStatement";
+    private static final String FOR_STATEMENT = "BSHForStatement";
+    private static final String ENHANCED_FOR_STATEMENT = "BSHEnhancedForStatement";
+    private static final String SWITCH_STATEMENT = "BSHSwitchStatement";
+    private static final String BLOCK = "BSHBlock";
 
     /**
      * Guards against re-entering the interpreter. Reading variables — and, later, evaluating
@@ -104,6 +125,9 @@ public final class BshHook {
     private static Method nodeGetLineNumber;
     private static Method nodeGetParent;
     private static Method nodeGetSourceFile;
+    private static Method nodeGetNumChildren;
+    private static Method nodeGetChild;
+    private static Field whileIsDoStatement;
     private static Method callStackDepth;
     private static Method callStackTop;
     private static Method nameSpaceGetVariableNames;
@@ -199,24 +223,67 @@ public final class BshHook {
     }
 
     /**
-     * A node is reported when its parent is a statement container, or when it has no parent at
-     * all (a top-level statement, which {@code Interpreter} evaluates as a bare parse-tree root).
-     *
-     * <p>{@code BSHBlock} itself is excluded: it is a container, not a step position, and
-     * reporting it would add a stop on the {@code {} of every braced body that the
-     * script-rewriting instrumenter never produced.
-     *
-     * <p>TODO brace-less bodies and {@code switch} statements. Both need a way to tell a
-     * container's body children from its header children without hard-coding child indices per
-     * node type. One option worth measuring: consult the script-rewriting instrumenter's
-     * pure-insertion oracle once per file and cache the resulting set of statement lines.
+     * A node is reported when it sits at statement position: a bare parse-tree root (how
+     * {@code Interpreter} evaluates a top-level statement), any child of a {@code BSHBlock}, or
+     * the body child of a control-flow node.
      */
     private static boolean isStatement(Object node) throws Exception {
-        if ("BSHBlock".equals(simpleName(node))) {
+        if (NEVER_REPORTED.contains(simpleName(node))) {
             return false;
         }
         Object parent = nodeGetParent.invoke(node);
-        return parent == null || STATEMENT_CONTAINERS.contains(simpleName(parent));
+        if (parent == null) {
+            return true;
+        }
+        String parentName = simpleName(parent);
+        if (BLOCK.equals(parentName)) {
+            // The hot path: every child of a block is a statement, so no index lookup is needed.
+            return true;
+        }
+
+        int count = (Integer) nodeGetNumChildren.invoke(parent);
+        int index = indexOfChild(parent, node, count);
+        if (index < 0) {
+            return false;
+        }
+        if (IF_STATEMENT.equals(parentName) || SWITCH_STATEMENT.equals(parentName)) {
+            return index >= 1;
+        }
+        if (FOR_STATEMENT.equals(parentName) || ENHANCED_FOR_STATEMENT.equals(parentName)) {
+            return index == count - 1;
+        }
+        if (WHILE_STATEMENT.equals(parentName)) {
+            return isDoStatement(parent) ? index == 0 : index == count - 1;
+        }
+        return false;
+    }
+
+    /** Identity search: nodes have no usable equals(), and the same subtree never repeats. */
+    private static int indexOfChild(Object parent, Object child, int count) throws Exception {
+        for (int i = 0; i < count; i++) {
+            if (nodeGetChild.invoke(parent, Integer.valueOf(i)) == child) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * {@code do ... while} and {@code while} share BSHWhileStatement but order their children
+     * oppositely. The distinguishing field is package-private; if a BeanShell build does not have
+     * it, assume the {@code while} layout, which is the common case.
+     */
+    private static boolean isDoStatement(Object whileNode) {
+        try {
+            if (whileIsDoStatement == null) {
+                Field field = whileNode.getClass().getDeclaredField("isDoStatement");
+                field.setAccessible(true);
+                whileIsDoStatement = field;
+            }
+            return whileIsDoStatement.getBoolean(whileNode);
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private static String simpleName(Object o) {
@@ -344,6 +411,8 @@ public final class BshHook {
                 nodeGetLineNumber = accessible(node.getClass().getMethod("getLineNumber"));
                 nodeGetParent = accessible(node.getClass().getMethod("jjtGetParent"));
                 nodeGetSourceFile = accessible(node.getClass().getMethod("getSourceFile"));
+                nodeGetNumChildren = accessible(node.getClass().getMethod("jjtGetNumChildren"));
+                nodeGetChild = accessible(node.getClass().getMethod("jjtGetChild", int.class));
 
                 Class<?> callStackClass = callstack.getClass();
                 callStackDepth = accessible(callStackClass.getMethod("depth"));

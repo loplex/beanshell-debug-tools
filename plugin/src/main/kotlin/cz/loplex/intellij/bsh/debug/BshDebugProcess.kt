@@ -13,17 +13,31 @@ import com.intellij.xdebugger.breakpoints.XLineBreakpoint
 import com.intellij.xdebugger.evaluation.XDebuggerEditorsProvider
 import com.intellij.xdebugger.frame.XSuspendContext
 import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 
+/*
+ * The return channel. The single byte that used to mean "resume" is CMD_RESUME, and other
+ * commands may precede it, so an agent speaking only the original protocol is unaffected.
+ */
+private const val CMD_RESUME = 0x01
+private const val CMD_SET_BREAKPOINTS = 0x02
+private const val CMD_SET_RUN_MODE = 0x03
+private const val MODE_RUN = 0
+private const val MODE_STEPPING = 1
+
 /**
- * Drives a BeanShell debug session. The forked JVM runs the instrumented script
- * whose agent connects back to [server]; each reported statement is either paused
- * (breakpoint / stepping) or released immediately. See [BshDebugProtocol]-style
- * framing in `BshDebugAgent`: `int line, int varCount, (utf name, utf value)*`,
- * and a single byte back to resume.
+ * Drives a BeanShell debug session. The forked JVM runs the script -- rewritten with hook calls,
+ * or untouched under the instrumenting agent, see [BshInstrumentationMode] -- whose agent connects
+ * back to [server]; each reported statement is either paused (breakpoint / stepping) or released
+ * immediately.
+ *
+ * Framing, agent to IDE: `int line, int callDepth, int varCount, (utf name, utf value)*`.
+ * IDE to agent: [CMD_RESUME], optionally preceded by [CMD_SET_BREAKPOINTS] and
+ * [CMD_SET_RUN_MODE] when [pushFilterToAgent] lets the agent filter for itself.
  */
 class BshDebugProcess(
     session: XDebugSession,
@@ -43,6 +57,16 @@ class BshDebugProcess(
      * snippet-relative line to the host pom.xml line.
      */
     private val lineMapper: (Int) -> Int = { it },
+    /**
+     * Whether to hand the agent its breakpoint set so it can filter locally instead of reporting
+     * every statement and waiting for a verdict.
+     *
+     * Only valid when [lineMapper] is the identity: filtering needs breakpoints expressed in the
+     * lines the agent reports, and there is no inverse of a non-trivial mapping. So the standalone
+     * `.bsh` path enables it and the injected-pom path does not, where the agent simply keeps
+     * reporting everything as before.
+     */
+    private val pushFilterToAgent: Boolean = false,
 ) : XDebugProcess(session) {
 
     private val editorsProvider = BshDebuggerEditorsProvider()
@@ -57,6 +81,7 @@ class BshDebugProcess(
     @Volatile private var runToLine: Int? = null
     private var socket: Socket? = null
     private var output: OutputStream? = null
+    private var commands: DataOutputStream? = null
 
     override fun createConsole(): ExecutionConsole {
         val console = TextConsoleBuilderFactory.getInstance().createBuilder(session.project).console
@@ -101,13 +126,49 @@ class BshDebugProcess(
     private fun proceed(newMode: BshStepMode) {
         mode = newMode
         stepDepth = currentDepth
+        // Tell the agent what to filter before letting it go, so it applies from the very next
+        // statement rather than one stop late.
+        pushFilter()
         releaseAgent()
     }
 
     private fun releaseAgent() {
+        writeToAgent { it.writeByte(CMD_RESUME) }
+    }
+
+    /**
+     * Hands the agent the breakpoint set and the current run mode.
+     *
+     * While stepping the agent must report every statement, because [BshStepLogic] owns that
+     * decision; only plain running can be filtered. A "Run to Cursor" target is pushed as an extra
+     * breakpoint -- without that it would never be reached, since a filtering agent would not
+     * report the line.
+     */
+    private fun pushFilter() {
+        if (!pushFilterToAgent) return
+        val lines = breakpoints.keys.toMutableSet()
+        runToLine?.let { lines.add(it) }
+        val path = sourceFile.path
+        writeToAgent { out ->
+            out.writeByte(CMD_SET_BREAKPOINTS)
+            out.writeInt(lines.size)
+            for (line in lines) {
+                out.writeUTF(path)
+                out.writeInt(line)
+            }
+            out.writeByte(CMD_SET_RUN_MODE)
+            out.writeByte(if (mode == BshStepMode.RUN) MODE_RUN else MODE_STEPPING)
+        }
+    }
+
+    /** Serialises writes: the platform calls resume/step and breakpoint changes from any thread. */
+    private fun writeToAgent(write: (DataOutputStream) -> Unit) {
+        val out = commands ?: return
         try {
-            output?.write(1)
-            output?.flush()
+            synchronized(out) {
+                write(out)
+                out.flush()
+            }
         } catch (_: Exception) {
             // connection gone; the process is ending
         }
@@ -118,6 +179,11 @@ class BshDebugProcess(
             val accepted = server.accept()
             socket = accepted
             output = accepted.getOutputStream()
+            commands = DataOutputStream(accepted.getOutputStream())
+            // The agent reports everything until it is told otherwise, so push the initial set as
+            // soon as the connection exists. The very first statement still arrives unfiltered:
+            // the agent opens the connection on its first report and cannot know sooner.
+            pushFilter()
             val input = DataInputStream(accepted.getInputStream())
             while (!stopped) {
                 val line = input.readInt()
@@ -152,11 +218,17 @@ class BshDebugProcess(
         XBreakpointHandler<XLineBreakpoint<XBreakpointProperties<*>>>(BshLineBreakpointType::class.java) {
 
         override fun registerBreakpoint(breakpoint: XLineBreakpoint<XBreakpointProperties<*>>) {
-            if (matchesScript(breakpoint)) breakpoints[breakpoint.line + 1] = breakpoint
+            if (!matchesScript(breakpoint)) return
+            breakpoints[breakpoint.line + 1] = breakpoint
+            // Picked up mid-run: the agent drains pending commands at each statement, so a
+            // breakpoint added while the script runs takes effect without a stop.
+            pushFilter()
         }
 
         override fun unregisterBreakpoint(breakpoint: XLineBreakpoint<XBreakpointProperties<*>>, temporary: Boolean) {
-            if (matchesScript(breakpoint)) breakpoints.remove(breakpoint.line + 1)
+            if (!matchesScript(breakpoint)) return
+            breakpoints.remove(breakpoint.line + 1)
+            pushFilter()
         }
 
         private fun matchesScript(breakpoint: XLineBreakpoint<*>): Boolean =

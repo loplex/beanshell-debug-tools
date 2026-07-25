@@ -50,15 +50,33 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
             PsiManager.getInstance(project).findFile(scriptFile) as? BshFile
         } ?: throw ExecutionException("Not a BeanShell file: ${configuration.scriptPath}")
 
-        val instrumented = ReadAction.compute<String, RuntimeException> {
-            BshDebugInstrumenter.instrument(psiFile)
+        // AGENT mode instruments the interpreter and runs the script untouched; REWRITE mode
+        // prefixes hook calls into a temp copy. Falling back keeps a session working when the
+        // agent jar is missing, which matters while it is not yet bundled with the plugin.
+        val agentJar = if (BshInstrumentationMode.CURRENT == BshInstrumentationMode.AGENT) {
+            BshDebugAgentJar.locate()
+        } else {
+            null
         }
-        val instrumentedFile = FileUtil.createTempFile("bsh-debug", ".bsh", true)
-        instrumentedFile.writeText(instrumented)
+        val useAgent = agentJar != null
 
-        val agent = BshLaunch.debugAgentClasspath()
-            ?: throw ExecutionException("BeanShell debug agent could not be located on the plugin classpath")
-        val classpath = listOf(agent, BshLaunch.classpath(configuration)).joinToString(File.pathSeparator)
+        val scriptToRun: File
+        val classpath: String
+        if (useAgent) {
+            scriptToRun = File(configuration.scriptPath)
+            classpath = BshLaunch.classpath(configuration)
+        } else {
+            val instrumented = ReadAction.compute<String, RuntimeException> {
+                BshDebugInstrumenter.instrument(psiFile)
+            }
+            val instrumentedFile = FileUtil.createTempFile("bsh-debug", ".bsh", true)
+            instrumentedFile.writeText(instrumented)
+            scriptToRun = instrumentedFile
+
+            val rewriteAgent = BshLaunch.debugAgentClasspath()
+                ?: throw ExecutionException("BeanShell debug agent could not be located on the plugin classpath")
+            classpath = listOf(rewriteAgent, BshLaunch.classpath(configuration)).joinToString(File.pathSeparator)
+        }
 
         // When Java debugging is available, run the JVM under JDWP so breakpoints in the
         // Java code called from the script are honoured by a second (Java) debug session.
@@ -75,11 +93,18 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
                 "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:$jdwpPort",
             )
         }
+        if (useAgent) {
+            commandLine.withParameters("-javaagent:${agentJar!!.absolutePath}")
+            // Instrumenting the interpreter reaches strictly more code than rewriting one script
+            // does, so without this the session would also stop inside BeanShell's own commands --
+            // print and friends are .bsh files on the classpath.
+            commandLine.withParameters("-Dbsh.debug.sources=${scriptToRun.name}")
+        }
         commandLine
             .withParameters("-D${BshDebugAgent.PORT_PROPERTY}=${server.localPort}")
             .withParameters("-cp", classpath)
             .withParameters(BshLaunch.MAIN_CLASS)
-            .withParameters(instrumentedFile.absolutePath)
+            .withParameters(scriptToRun.absolutePath)
             .withParameters(ParametersListUtil.parse(configuration.programArguments))
             .withWorkDirectory(BshLaunch.workingDirectory(configuration, File(configuration.scriptPath)))
             .withCharset(Charsets.UTF_8)
@@ -91,7 +116,12 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
             environment,
             object : XDebugProcessStarter() {
                 override fun start(session: XDebugSession): XDebugProcess =
-                    BshDebugProcess(session, processHandler, server, scriptFile)
+                    BshDebugProcess(
+                        session, processHandler, server, scriptFile,
+                        // Identity line mapping for a standalone .bsh, so the agent can be
+                        // given the breakpoint set and filter locally.
+                        pushFilterToAgent = useAgent,
+                    )
             },
         )
 

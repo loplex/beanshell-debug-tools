@@ -6,7 +6,8 @@ import org.jetbrains.intellij.platform.gradle.extensions.intellijPlatform
 rootProject.name = "bsh-plugin"
 
 include(":plugin")
-include(":agent")
+include(":agent:hook")
+include(":agent:instrument")
 
 pluginManagement {
     plugins {

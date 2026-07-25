@@ -38,17 +38,7 @@ import java.security.ProtectionDomain;
  * — the verifier accepts a reference where its supertype is expected — and the hook recovers
  * what it needs reflectively.
  */
-public final class EvalTransformer implements ClassFileTransformer {
-
-    /*
-     * Public on purpose. Appending the agent jar to the bootstrap classloader makes every class
-     * in it resolvable from two loaders, and parent-first delegation means this one is loaded by
-     * bootstrap while BshAgentMain stays in the system loader. Same package name, different
-     * runtime package — so package-private access across them is an IllegalAccessError.
-     *
-     * TODO: ship the hook in a separate bootstrap-only jar instead, so the agent jar never needs
-     * to be on the bootstrap search path and no class exists twice.
-     */
+final class EvalTransformer implements ClassFileTransformer {
 
     /** The BeanShell AST evaluation contract. */
     private static final String EVAL_NAME = "eval";

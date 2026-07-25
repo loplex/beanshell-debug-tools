@@ -4,7 +4,7 @@
 .intellijPlatform/
 /build/
 /plugin/build/
-/agent/build/
+/agent/*/build/
 
 /.claude/
 .DS_Store

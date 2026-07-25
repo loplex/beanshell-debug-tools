@@ -1,6 +1,10 @@
 package cz.loplex.bsh.agent;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.instrument.Instrumentation;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,21 +18,23 @@ import java.util.jar.JarFile;
  * classloader loaded BeanShell. In a plain application that is the system loader, but in a
  * Maven build BeanShell lives in a plugin classloader that cannot see the application
  * classpath at all. The only loader every other loader delegates to is the bootstrap loader,
- * so the agent jar is appended there.
+ * so the hook is published there.
  *
- * <p><b>Why this class must never reference {@code BshHook}.</b> Appending the agent jar to
- * the bootstrap search does not remove it from the system classpath, so both loaders can
- * define the hook. If this class touched {@code BshHook}, the system loader would define
- * copy #1 while instrumented BeanShell code resolved copy #2 from bootstrap — two sets of
- * static state, and any configuration applied here would be invisible to the copy that
- * actually runs. Configuration therefore travels through system properties, which are
- * loader-independent, and the hook class name appears only as a string constant (here and
- * in {@link EvalTransformer}).
+ * <p>It travels as a <b>nested jar</b> inside this one rather than as loose classes, which is
+ * what keeps it to a single copy: the system classloader has no hook classes to define, so the
+ * bootstrap copy is the only one in the JVM. Two copies would mean two sets of static state,
+ * with the instrumented interpreter using one and the agent configuring the other. For the same
+ * reason configuration travels through system properties, which are loader-independent, and the
+ * hook type is never named in agent code — only as the string constant in
+ * {@link EvalTransformer}.
  */
 public final class BshAgentMain {
 
     /** Set once the agent has installed itself, so a double attach is a no-op. */
     private static final String INSTALLED_PROPERTY = "bsh.debug.agent.installed";
+
+    /** Name of the nested jar holding the hook, placed at the root of this jar by the build. */
+    private static final String HOOK_JAR_RESOURCE = "/bsh-debug-hook.jar";
 
     private BshAgentMain() {
     }
@@ -50,7 +56,7 @@ public final class BshAgentMain {
 
         applyOptions(options);
 
-        if (!appendSelfToBootstrap(inst)) {
+        if (!publishHookToBootstrap(inst)) {
             // Without bootstrap visibility the injected call would throw
             // NoClassDefFoundError inside the interpreter, which is far worse than
             // not debugging at all.
@@ -89,31 +95,44 @@ public final class BshAgentMain {
         }
     }
 
-    /** Publishes this jar — hook class included — to the bootstrap classloader. */
-    private static boolean appendSelfToBootstrap(Instrumentation inst) {
-        JarFile jar = null;
+    /**
+     * Extracts the nested hook jar and publishes it to the bootstrap classloader.
+     *
+     * <p>{@code appendToBootstrapClassLoaderSearch} takes a {@link JarFile}, so a jar nested
+     * inside another cannot be handed over directly and has to be unpacked to a real file first.
+     * The JVM keeps that file open and loads from it lazily for the rest of the run, so it must
+     * not be deleted here — only marked for deletion at exit.
+     */
+    private static boolean publishHookToBootstrap(Instrumentation inst) {
+        InputStream source = BshAgentMain.class.getResourceAsStream(HOOK_JAR_RESOURCE);
+        if (source == null) {
+            System.err.println("[bsh-agent] " + HOOK_JAR_RESOURCE + " is missing from the agent jar");
+            return false;
+        }
         try {
-            File self = new File(BshAgentMain.class.getProtectionDomain()
-                    .getCodeSource().getLocation().toURI());
-            if (!self.isFile()) {
-                // Running from a directory (e.g. an IDE run configuration) rather than a jar.
-                // appendToBootstrapClassLoaderSearch only accepts jars.
-                System.err.println("[bsh-agent] agent is not packaged as a jar: " + self);
-                return false;
+            File extracted = File.createTempFile("bsh-debug-hook", ".jar");
+            extracted.deleteOnExit();
+            OutputStream target = new FileOutputStream(extracted);
+            try {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = source.read(buffer)) > 0) {
+                    target.write(buffer, 0, read);
+                }
+            } finally {
+                target.close();
             }
-            jar = new JarFile(self);
-            inst.appendToBootstrapClassLoaderSearch(jar);
+            inst.appendToBootstrapClassLoaderSearch(new JarFile(extracted));
             return true;
         } catch (Throwable t) {
-            System.err.println("[bsh-agent] failed to reach the bootstrap classloader: " + t);
-            if (jar != null) {
-                try {
-                    jar.close();
-                } catch (Throwable ignored) {
-                    // nothing useful to do
-                }
-            }
+            System.err.println("[bsh-agent] failed to publish the hook to the bootstrap classloader: " + t);
             return false;
+        } finally {
+            try {
+                source.close();
+            } catch (IOException ignored) {
+                // nothing useful to do
+            }
         }
     }
 

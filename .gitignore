@@ -1,8 +1,10 @@
 .gradle/
 /.idea/
+*.iml
 .intellijPlatform/
 /build/
 /plugin/build/
+/agent/build/
 
 /.claude/
 .DS_Store

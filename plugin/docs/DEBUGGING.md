@@ -1,12 +1,57 @@
 # Debugging internals
 
 BeanShell is an interpreter with no debug protocol: a running script is evaluated
-as an AST inside `bsh.Interpreter`, so the JVM has no bytecode/line information
-for `.bsh` lines and JDWP breakpoints cannot bind to them. The plugin therefore
+as an AST inside `bsh.Interpreter`, so the JVM has no bytecode/line information for
+`.bsh` lines and JDWP breakpoints cannot bind to them. The plugin therefore
 implements a **source-level debugger by instrumentation**, and layers Java (JDWP)
 debugging on top for the Java code a script calls.
 
-## How BeanShell-level debugging works
+The measurements behind "JDWP cannot bind to them" — and why that is a property of
+the language rather than a gap someone could close — are in
+[`agent/README.md`](../../agent/README.md).
+
+## Which instrumentation runs
+
+There are two runtime mechanisms and one verification oracle. Selected by
+`BshInstrumentationMode.CURRENT`, today **`AGENT`**.
+
+| Implementation | Role |
+|---|---|
+| `agent/` (JVM agent) | **Default.** Instruments the interpreter; the script is untouched |
+| `debug/BshDebugInstrumenter.kt` (PSI) | Fallback. Needs only a source file — no agent, no JVM flag |
+| `tools/bshInstrumenter.main.kts` | **Not a runtime option.** A verification oracle |
+
+The agent is preferred because rewriting is visible to the user: the injected call
+becomes a real statement, so it shows up in `getInvocationText()` and therefore in
+error messages and stack traces. Rewriting also cannot reach scripts the plugin
+never sees — `eval(String)` input, scripts loaded as classpath resources, or script
+text built at runtime — which is the common shape for a library that embeds
+BeanShell. The fallback survives because it needs nothing but the file: no agent
+jar, no `-javaagent`.
+
+The `.kts` was never a competing production path. PSI classes do not exist outside
+a running IntelliJ, so it reproduces rewriting on the command line. What it retains
+is unique value: it decides instrumentability **empirically**, by inserting the
+hook, reparsing with BeanShell's *own* parser, and accepting only when the tree is
+the original with one statement spliced in as a sibling. That makes it
+authoritative about what is a statement, so it is kept as the oracle in
+`tools/check-instrumentation.py` rather than maintained as a third way to run a
+session. Its `O(n²)` reparsing would rule it out for interactive use anyway.
+
+**Two different things are called "the agent".** `agent/` is the ASM-instrumenting
+JVM agent (`cz.loplex.bsh.*`), the default. `debug/agent/BshDebugAgent.java` is the
+in-plugin hook class the *rewritten source* calls into
+(`cz.loplex.intellij.bsh.debug.agent`). Which one is meant follows from the package.
+
+## The agent path (default)
+
+`BshDebugAgentJar.locate()` finds the jar, the forked JVM is started with
+`-javaagent:…`, and `bsh.Interpreter`'s AST evaluation is instrumented in memory.
+The script on disk is never modified. Internals — the transformer, the bootstrap
+hook, the landmines — are in [`agent/README.md`](../../agent/README.md); the wire
+protocol is documented there too.
+
+## The rewriting path (fallback)
 
 ### 1. Instrumentation — `debug/BshDebugInstrumenter.kt`
 Before launching, the script is rewritten to call a hidden hook in front of every
@@ -22,23 +67,24 @@ transformation is semantics-preserving — each hook is just one extra statement
 Reported line numbers are the originals, so breakpoints keep mapping after the
 preamble/hooks shift the text.
 
-### 2. The agent — `debug/agent/BshDebugAgent.java`
+### 2. The in-plugin hook — `debug/agent/BshDebugAgent.java`
 A pure-JDK class (no Kotlin/IntelliJ/BeanShell compile dependency) added to the
 forked JVM's classpath. On the first `step()` it connects to the IDE over a
 socket (`bsh.debug.port`). For each statement it sends `line`, the call depth, and
 the caller's variables (read reflectively from the passed `bsh.NameSpace`), then
 **blocks** until the IDE releases it. The script's own stdout/stderr stay clean.
 
-### 3. The IDE side — `debug/BshDebugProcess.kt`
-An `XDebugProcess` reads the frames and decides, per statement, whether to pause
-(a breakpoint on that line, or the active step mode) or release immediately.
-`BshLineBreakpointType` allows breakpoints in `.bsh` files; `BshDebugFrames`
-exposes the stack frame and variables.
+## The IDE side — `debug/BshDebugProcess.kt`
+
+Shared by both paths, because both speak the same protocol. An `XDebugProcess`
+reads the frames and decides, per statement, whether to pause (a breakpoint on that
+line, or the active step mode) or release immediately. `BshLineBreakpointType`
+allows breakpoints in `.bsh` files; `BshDebugFrames` exposes the stack frame and
+variables.
 
 ### Stepping by call depth — `debug/BshStepLogic.kt`
-The agent reports the BeanShell call depth (the number of active `bsh.BshMethod`
-frames on the JVM stack — monotonic per nested call). Step actions compare against
-the depth captured when the step began:
+The reported BeanShell call depth is monotonic per nested call. Step actions
+compare against the depth captured when the step began:
 
 | Action | Pauses when |
 |--------|-------------|
@@ -63,9 +109,13 @@ BeanShell debugger runs.
 
 ## Limitations
 
-- Step Over/Into/Out are driven by call depth; recursion is handled, but there is
-  a stdin/stdout round-trip per statement (fine for debugging pace).
 - Variable values are shown as their `toString()`; there is no expression
   evaluation against the live namespace yet.
 - The BeanShell stack view is single-frame (the current statement); the Java
   session provides the full JVM stack when stopped in Java code.
+- The protocol carries no thread id and the hook holds a global lock while
+  suspended, so two script threads cannot be told apart or suspended
+  independently.
+
+All three are tracked in [`docs/FUTURE_WORK.md`](../../docs/FUTURE_WORK.md), and
+all three are deferred to land together with DAP's vocabulary.

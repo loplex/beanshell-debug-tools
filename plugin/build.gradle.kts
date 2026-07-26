@@ -34,10 +34,31 @@ dependencies {
     }
 }
 
+// --- The instrumenting debug agent -----------------------------------------------
+// Shipped inside the plugin and extracted at debug time, exactly like the Maven core
+// extension below. It is a resource rather than a lib/ jar on purpose: the agent's classes
+// belong in the debugged JVM, and putting them on the plugin's own classpath would give the
+// IDE a second, shaded copy of ASM for no reason.
+val agentJar: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+}
+
+dependencies {
+    agentJar(project(path = ":agent:instrument", configuration = "shadedJar"))
+}
+
 // The Gradle project is named after its directory, so the distribution would be
-// `plugin-<version>.zip`. Name it for the plugin instead. Deliberately not done through
-// `intellijPlatform.pluginConfiguration.name`, which would also rewrite <name> in
-// plugin.xml — the name shown on the Marketplace.
+// `plugin-<version>.zip`. Name it for the plugin instead.
+//
+// The two tidier-looking levers are both wrong, measured rather than assumed:
+// `intellijPlatform.pluginConfiguration.name` also rewrites <name> in plugin.xml — the name
+// shown on the Marketplace — and `base.archivesName` renames only the intermediate
+// instrumented jar, leaving the distribution alone and producing three differently named jars
+// in build/libs. The jar and directory inside the ZIP stay `plugin`; they are invisible to
+// users and the only way to change them is renaming the Gradle project, which would cost the
+// `:plugin:` task paths.
 tasks.named<Zip>("buildPlugin") {
     archiveBaseName.set("intellij-beanshell")
 }
@@ -85,5 +106,10 @@ val mavenExtJar by tasks.registering(Jar::class) {
 tasks.named<Copy>("processResources") {
     from(mavenExtJar) {
         into("beanshell")
+    }
+    // Renamed to drop the version, so the runtime lookup is a constant rather than a search.
+    from(agentJar) {
+        into("beanshell")
+        rename { "bsh-debug-agent.jar" }
     }
 }

@@ -10,18 +10,7 @@ Ordered by what blocks what, not by size.
 
 ## Blocking a release
 
-### 1. Bundle the agent jar with the plugin
-
-`BshDebugAgentJar.locate()` searches an override property, then next to the plugin
-jar, then the sibling subproject's `build/libs/` as a development fallback. Only
-the second belongs in a shipped plugin, and **nothing populates it yet**, so a
-released plugin silently falls back to source rewriting.
-
-The mechanism already exists in `plugin/build.gradle.kts` — `mavenExtJar` is fed
-into `processResources` exactly this way — so this is wiring
-`:agent:instrument:shadowJar` in beside it, not a new problem.
-
-### 2. Move the debugger fixtures into this repository
+### 1. Move the debugger fixtures into this repository
 
 `debug-samples/` (9 scripts + `DebugHost.java` + a README with a hook-point
 coverage table) lives in the BeanShell checkout at
@@ -77,7 +66,7 @@ is why `c = this.caller; c.caller` is rejected.
 The protocol carries no thread id and the hook holds a global lock while suspended,
 so two script threads cannot be told apart or suspended independently. Needs a
 protocol change, so it belongs with DAP. Exercised by
-`debug-samples/06_callbacks_threads.bsh` and `DebugHost` scenario 5 — see item 2.
+`debug-samples/06_callbacks_threads.bsh` and `DebugHost` scenario 5 — see item 1.
 
 ---
 

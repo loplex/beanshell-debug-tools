@@ -1,6 +1,7 @@
 package cz.loplex.intellij.bsh.debug
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.util.io.FileUtil
 import java.io.File
 
 /**
@@ -53,17 +54,24 @@ enum class BshInstrumentationMode {
 /**
  * Locates the instrumenting agent jar.
  *
- * Not yet bundled into the plugin distribution, so the search is deliberately broad and every
- * failure falls back to [BshInstrumentationMode.REWRITE] rather than breaking the session. Once
- * the plugin build ships the jar, the first branch is the only one that stays.
+ * The jar is shipped as a plugin resource (see the `agentJar` configuration in
+ * `build.gradle.kts`) and extracted to a temp file on first use, so it can be passed to a forked
+ * JVM as `-javaagent:`. Same mechanism as [BshMavenExt], and for the same reason: the jar has to
+ * exist as a file on disk, but its classes must not join the IDE's own classpath.
+ *
+ * Failure returns `null` rather than throwing — the caller falls back to
+ * [BshInstrumentationMode.REWRITE], which is degraded but working.
  */
 object BshDebugAgentJar {
 
     /** Override, mainly for development and for the command-line tools. */
     const val PATH_PROPERTY: String = "bsh.debug.agent.jar"
 
-    private const val JAR_PREFIX = "bsh-debug-agent"
+    private const val RESOURCE = "/beanshell/bsh-debug-agent.jar"
     private val log = Logger.getInstance(BshDebugAgentJar::class.java)
+
+    @Volatile
+    private var cached: File? = null
 
     fun locate(): File? {
         System.getProperty(PATH_PROPERTY)?.let { override ->
@@ -71,37 +79,23 @@ object BshDebugAgentJar {
             if (file.isFile) return file
             log.warn("$PATH_PROPERTY points at a missing file: $override")
         }
-        return bundled() ?: builtFromSource()
+        return bundled()
     }
 
-    /** Where the jar will live once the plugin build bundles it. */
     private fun bundled(): File? {
-        val pluginRoot = pluginJarOrClassesDir()?.parentFile ?: return null
-        return pluginRoot.listFiles()
-            ?.firstOrNull { it.isFile && it.name.startsWith(JAR_PREFIX) && it.name.endsWith(".jar") }
-    }
-
-    /**
-     * Development fallback: the sibling subproject's build output, reached by walking up from
-     * the plugin's own classes. Deliberately tolerant, since it only ever helps a developer
-     * running the plugin from source.
-     */
-    private fun builtFromSource(): File? {
-        var directory = pluginJarOrClassesDir()
-        repeat(MAX_PARENTS_SEARCHED) {
-            directory = directory?.parentFile ?: return null
-            val target = File(directory, "agent/instrument/build/libs")
-            if (target.isDirectory) {
-                return target.listFiles()
-                    ?.firstOrNull { it.isFile && it.name.startsWith(JAR_PREFIX) && it.name.endsWith(".jar") }
+        cached?.let { if (it.isFile) return it }
+        synchronized(this) {
+            cached?.let { if (it.isFile) return it }
+            val stream = javaClass.getResourceAsStream(RESOURCE)
+            if (stream == null) {
+                log.warn("bundled agent jar not found on the plugin classpath: $RESOURCE")
+                return null
             }
+            return runCatching {
+                val target = FileUtil.createTempFile("bsh-debug-agent", ".jar", true)
+                stream.use { input -> target.outputStream().use { input.copyTo(it) } }
+                target.also { cached = it }
+            }.onFailure { log.warn("cannot extract the bundled agent jar", it) }.getOrNull()
         }
-        return null
     }
-
-    private fun pluginJarOrClassesDir(): File? = runCatching {
-        File(BshDebugAgentJar::class.java.protectionDomain.codeSource.location.toURI())
-    }.getOrNull()
-
-    private const val MAX_PARENTS_SEARCHED = 8
 }

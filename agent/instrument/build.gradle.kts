@@ -71,3 +71,15 @@ tasks.shadowJar {
 }
 
 tasks.named("assemble") { dependsOn(tasks.shadowJar) }
+
+// The shaded jar, offered to other subprojects by name. The default runtime variant carries
+// the plain jar -- no ASM, no nested hook -- which would fail at premain rather than at build
+// time, so consumers have to ask for this one explicitly.
+val shadedJar: Configuration by configurations.creating {
+    isCanBeConsumed = true
+    isCanBeResolved = false
+}
+
+artifacts {
+    add(shadedJar.name, tasks.shadowJar)
+}

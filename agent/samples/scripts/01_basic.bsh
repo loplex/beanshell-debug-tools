@@ -1,0 +1,54 @@
+// Top-level statements: the outermost eval loop.
+//
+// Hook points exercised:
+//   Interpreter.java:659  when run via source()/eval(Reader) from Java
+//   Interpreter.java:471  when pasted into the interactive REPL
+//   BSHBlock.java:105     for the statements inside the for/while blocks
+//
+// Note the asymmetry: every line here is a *separate* top-level node when
+// sourced, so Interpreter's loop sees each one. Statements inside the loop
+// bodies below do NOT come back through that loop -- only through BSHBlock.
+
+print("=== 01_basic ===");
+
+a = 1;                                  // BP:1  loose (untyped) assignment
+int b = 2;                              // BP:2  typed assignment
+String label = "sum";                   // BP:3
+c = a + b;                              // BP:4  binary expression
+
+print(label + " = " + c);               // BP:5  command invocation
+
+// Same line hit repeatedly -- use this to test breakpoint hit counts and
+// that you do not leak one debugger event per node evaluation.
+total = 0;
+for (i = 0; i < 5; i++) {
+    total = total + i;                  // BP:6  hit 5x, inside BSHBlock
+}
+print("total = " + total);              // BP:7
+
+// Enhanced for -- different AST node (BSHEnhancedForStatement), same block path.
+items = new int[] { 10, 20, 30 };
+seen = 0;
+for (item : items) {
+    seen = seen + item;                 // BP:8  hit 3x
+}
+print("seen = " + seen);
+
+// while + break/continue: ReturnControl-style flow that a stepper must not
+// mistake for a method return.
+n = 0;
+while (true) {
+    n++;
+    if (n < 3) continue;                // BP:9
+    break;                              // BP:10
+}
+print("n = " + n);
+
+// Block scoping: BlockNameSpace is pushed here, so a "variables" view must
+// walk NameSpace.getParent() to see 'a' from the enclosing scope.
+{
+    scoped = a + 100;                   // BP:11  scoped is in a BlockNameSpace
+    print("scoped = " + scoped);
+}
+
+print("01_basic done");

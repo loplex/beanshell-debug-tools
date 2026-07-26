@@ -1,0 +1,90 @@
+// Scripted methods: frames, recursion, locking.
+//
+// Hook points exercised:
+//   BshMethod.java:204    invoke() -- entry for every scripted method
+//   BshMethod.java:256    invokeImpl() -- note it runs UNDER the lock for
+//                         synchronized methods, which is why :204 is the
+//                         better place to count entries
+//   BSHBlock.java:105     each statement in a method body
+//   Name.java:885         invokeLocalMethod, for the unqualified call form
+//
+// Every call below is the unqualified foo() form, so it goes through
+// Name.invokeLocalMethod. See 03_invocation_forms.bsh for the form that
+// bypasses Name entirely.
+
+print("=== 02_methods ===");
+
+// Loose method: no declared types anywhere.
+add(x, y) {
+    sum = x + y;                        // BP:1  first line of a method body
+    return sum;                         // BP:2
+}
+
+// Fully typed method.
+int multiply(int x, int y) {
+    return x * y;                       // BP:3
+}
+
+// Void method -- returns Primitive.VOID, not null. A variables view must not
+// render this as a Java null.
+void logIt(String msg) {
+    print("  log: " + msg);             // BP:4
+}
+
+// Nested calls: two frames deep. Stack trace should show
+// deepest -> outer -> <top level>.
+outer(v) {
+    doubled = multiply(v, 2);           // BP:5  frame boundary going in
+    logIt("doubled to " + doubled);
+    return add(doubled, 1);             // BP:6
+}
+
+// Recursion: use this to verify frame depth reporting and that you do not
+// hold a strong ref per frame. depth 5 -> 5 nested frames.
+factorial(n) {
+    if (n <= 1) {
+        return 1;                       // BP:7  base case, deepest frame
+    }
+    return n * factorial(n - 1);        // BP:8  hit at every depth
+}
+
+// Synchronized method: BshMethod.invoke() takes the lock (declaringNameSpace's
+// This ref) and then calls invokeImpl. Instrumenting invokeImpl instead of
+// invoke means your "method entered" event fires inside the critical section.
+synchronized guarded(x) {
+    return x * 10;                      // BP:9
+}
+
+// Method with an explicit throws clause -- numThrows affects which child node
+// index the body sits at in BSHMethodDeclaration.insureNodesParsed().
+void mayFail(boolean doFail) throws Exception {
+    if (doFail) {
+        throw new Exception("requested failure");   // BP:10
+    }
+    print("  mayFail: ok");
+}
+
+print("add(2,3) = " + add(2, 3));
+print("outer(4) = " + outer(4));
+print("factorial(5) = " + factorial(5));
+print("guarded(7) = " + guarded(7));
+mayFail(false);
+
+// REDEFINITION DOES NOT REPLACE. Verified against NameSpace.setMethod
+// (NameSpace.java:880-900): it never overwrites. On the second definition it
+// builds a Vector of overloads and APPENDS. getMethod then returns the first
+// signature match -- which is the OLD one.
+//
+// So both prints below say "first". The stale AST stays live and reachable
+// forever, and it is the one that actually executes.
+//
+// This is the single nastiest trap for a debugger with any kind of
+// re-source / hot-reload workflow: the user edits the file, re-sources it, and
+// then steps through the NEW text while the interpreter runs the OLD tree.
+// Breakpoints resolve against text that is not what is executing.
+shadowed() { return "first"; }          // BP:11 this one keeps winning
+print("shadowed = " + shadowed());      //        -> "first"
+shadowed() { return "second"; }         // BP:12 appended, never reached
+print("shadowed = " + shadowed());      //        -> "first", NOT "second"
+
+print("02_methods done");

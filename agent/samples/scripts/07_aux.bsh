@@ -1,0 +1,20 @@
+// Sourced by 07_eval_and_source.bsh.
+//
+// Nodes defined here report getSourceFile() == "07_aux.bsh" (or the absolute
+// path used at source() time), even when the method is CALLED from the other
+// file. That is the behaviour a stack trace must reflect: the frame belongs to
+// the file where the code was written, not where it was invoked.
+
+print("  [07_aux loaded]");             // BP:A1  runs during source()
+
+auxAdd(a, b) {
+    partial = a + b;                    // BP:A2  frame file = 07_aux.bsh
+    return partial;
+}
+
+auxDeep(n) {
+    if (n <= 0) {
+        return "bottom";                // BP:A3
+    }
+    return auxDeep(n - 1);
+}

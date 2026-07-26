@@ -8,6 +8,7 @@ rootProject.name = "bsh-plugin"
 include(":plugin")
 include(":agent:hook")
 include(":agent:instrument")
+include(":agent:samples")
 
 pluginManagement {
     plugins {

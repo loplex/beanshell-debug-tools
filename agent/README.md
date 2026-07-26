@@ -181,8 +181,22 @@ vocabulary — see [`docs/FUTURE_WORK.md`](../docs/FUTURE_WORK.md).
 
 ## 4. Verifying it
 
-The transport can be exercised without the IDE, and the instrumentation boundaries
-are checked against a marked fixture. Both live with the plugin's tools:
+[`samples/`](samples/README.md) holds the fixtures: nine scripts covering one
+execution path each, plus `DebugHost`, which embeds BeanShell the way a
+third-party library does. Run them through both entry points — `Interpreter.run()`
+and `Interpreter.eval()` are separate loops, and an agent that hooks only one looks
+correct in the CLI and does nothing in a library.
+
+```bash
+./gradlew :agent:samples:runHost            # uninstrumented
+./gradlew :agent:samples:runHostWithAgent   # the same, under the agent
+```
+
+The two must agree, which is what pins down "behaviour unchanged". The README
+there lists the three differences that are legitimate.
+
+The transport itself can be exercised without the IDE, and the instrumentation
+boundaries are checked against a marked fixture; both live with the plugin's tools,
 [`plugin/tools/README.md`](../plugin/tools/README.md).
 
 Known BeanShell bugs met along the way are recorded in

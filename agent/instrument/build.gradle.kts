@@ -20,7 +20,7 @@ description = "Instruments bsh.Interpreter's AST evaluation to provide source-le
 // The hook jar travels inside this one as a resource. Resolved through its own
 // configuration rather than a cross-project task reference, so the file arrives as a
 // dependency artifact and the configuration cache stays valid.
-val hookJar: Configuration by configurations.creating {
+val hookJar = configurations.create("hookJar") {
     isCanBeConsumed = false
     isCanBeResolved = true
     isTransitive = false
@@ -75,7 +75,7 @@ tasks.named("assemble") { dependsOn(tasks.shadowJar) }
 // The shaded jar, offered to other subprojects by name. The default runtime variant carries
 // the plain jar -- no ASM, no nested hook -- which would fail at premain rather than at build
 // time, so consumers have to ask for this one explicitly.
-val shadedJar: Configuration by configurations.creating {
+val shadedJar = configurations.create("shadedJar") {
     isCanBeConsumed = true
     isCanBeResolved = false
 }

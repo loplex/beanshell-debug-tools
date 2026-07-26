@@ -10,7 +10,7 @@ plugins {
 dependencies {
     // BeanShell interpreter, bundled into the plugin so scripts run out of the box.
     // This is the version published to Maven Central and matches the 2.0b6 grammar.
-    implementation("org.apache-extras.beanshell:bsh:2.0b6")
+    implementation(libs.bsh)
 
     testImplementation(libs.junit)
 
@@ -39,7 +39,7 @@ dependencies {
 // extension below. It is a resource rather than a lib/ jar on purpose: the agent's classes
 // belong in the debugged JVM, and putting them on the plugin's own classpath would give the
 // IDE a second, shaded copy of ASM for no reason.
-val agentJar: Configuration by configurations.creating {
+val agentJar = configurations.create("agentJar") {
     isCanBeConsumed = false
     isCanBeResolved = true
     isTransitive = false

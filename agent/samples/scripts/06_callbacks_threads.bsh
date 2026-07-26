@@ -1,0 +1,99 @@
+// Java-driven callbacks and threads: where the CallStack assumption bites.
+//
+// Two things here that will break a naive debugger:
+//
+// 1. NO CALLER NODE. When Java calls into a script through a proxy interface,
+//    This.invokeMethod is entered with callerInfo == null and substitutes
+//    SimpleNode.JAVACODE (This.java:236). That node reports
+//      getSourceFile() -> "<Called from Java Code>"
+//      getLineNumber() -> -1
+//    so the OUTERMOST frame of such a call has no script position. Do not let
+//    that -1 reach the IDE as a line number.
+//
+// 2. ONE CALLSTACK PER THREAD. CallStack.java:44-54 spells it out: each external
+//    entry into a script creates a FRESH CallStack. There is no global "current
+//    frame" -- your debugger state must be keyed per thread, and you must decide
+//    whether stopping one script thread suspends the others.
+//    (Note: LSP4IJ's DAP client does not support the Thread event, so newly
+//    appearing script threads may not show up in the IDE by themselves.)
+//
+// Hook points exercised:
+//   This.java:208 / :236    the JAVACODE substitution
+//   XThis.java:193          proxy handler -> invokeMethod
+//   BshMethod.java:204      the body
+
+print("=== 06_callbacks_threads ===");
+
+// ---- proxy interface implemented by a bsh closure --------------------------
+// This is XThis + java.lang.reflect.Proxy, NOT a generated class.
+
+makeRunnable(name) {
+    run() {
+        // Frame above this one has no script position (JAVACODE).
+        print("  run() from " + name);          // BP:1
+        return null;
+    }
+    return this;
+}
+
+r = makeRunnable("direct");
+task = (Runnable) r;                            // BP:2  proxy created here
+task.run();                                     // BP:3  Java iface -> script
+
+// ---- same thing on another thread -> separate CallStack -------------------
+
+worker = makeRunnable("thread-A");
+t1 = new Thread((Runnable) worker, "bsh-worker-A");
+t1.start();                                     // BP:4
+t1.join();
+
+// Two threads in the same script at once: breakpoint at BP:5 and check that
+// your debugger reports two independent stacks and does not interleave them
+// into one.
+spin(id) {
+    run() {
+        for (i = 0; i < 3; i++) {
+            print("  spin " + id + " step " + i);   // BP:5  hit 6x, 2 threads
+            Thread.sleep(10);
+        }
+        return null;
+    }
+    return this;
+}
+
+ta = new Thread((Runnable) spin("X"), "bsh-X");
+tb = new Thread((Runnable) spin("Y"), "bsh-Y");
+ta.start();
+tb.start();
+ta.join();
+tb.join();
+
+// ---- anonymous-inner-class syntax: same proxy machinery -------------------
+
+counter = 0;
+listener = new Runnable() {
+    public void run() {
+        counter++;                              // BP:6  writes enclosing scope
+        print("  anon run, counter=" + counter);
+    }
+};
+listener.run();
+listener.run();
+print("counter = " + counter);
+
+// ---- callback invoked from inside a Java collection API -------------------
+// Java frame between two script frames: script -> Java -> script.
+
+cmp = new java.util.Comparator() {
+    public int compare(Object a, Object b) {
+        return ((Integer) a).intValue() - ((Integer) b).intValue();   // BP:7
+    }
+};
+nums = new java.util.ArrayList();
+nums.add(new Integer(3));
+nums.add(new Integer(1));
+nums.add(new Integer(2));
+java.util.Collections.sort(nums, cmp);          // BP:8  sandwiched frames
+print("nums = " + nums);
+
+print("06_callbacks_threads done");

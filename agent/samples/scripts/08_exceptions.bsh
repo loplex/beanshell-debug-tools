@@ -1,0 +1,145 @@
+// Errors: the three-way split a debugger has to classify correctly.
+//
+//   TargetError      an exception thrown BY the script (or by Java code the
+//                    script called). Catchable inside the script. Auto-unwrapped
+//                    when caught. -> "exception thrown" in debugger terms.
+//   EvalError        the script cannot continue: undefined variable, bad cast,
+//                    parse error. Not normally catchable as a Java exception.
+//   InterpreterError unchecked, an interpreter bug. Should never be shown as a
+//                    user-level exception.
+//
+// See the doc comments in EvalError.java, TargetError.java, UtilEvalError.java.
+// The rule that matters for instrumentation: utilities throw UtilEvalError,
+// AST nodes catch it and rethrow as EvalError via toEvalError(node). So the same
+// underlying failure appears under two types depending on where you hook.
+//
+// "Break on exception" needs to distinguish caught from uncaught. Note that
+// LSP4IJ's DAP client does not support the ExceptionInfo request, so rich
+// exception detail in the IDE is limited even if you detect it.
+
+print("=== 08_exceptions ===");
+
+// ---- caught inside the script: TargetError, unwrapped ---------------------
+
+thrower() {
+    throw new IllegalStateException("thrown from script");   // BP:1
+}
+
+try {
+    thrower();
+} catch (IllegalStateException e) {
+    // The script sees a plain IllegalStateException, not a TargetError.
+    print("  caught typed: " + e.getMessage());              // BP:2
+}
+
+// Loose catch: bsh lets you omit the type.
+try {
+    thrower();
+} catch (e) {
+    print("  caught loose: " + e);                           // BP:3
+}
+
+// ---- exception raised by Java code the script called ---------------------
+
+try {
+    list = new java.util.ArrayList();
+    list.get(5);                                             // BP:4  IndexOutOfBounds
+} catch (e) {
+    print("  caught from java: " + e.getClass().getName());
+}
+
+// ---- finally: must run even when the debugger is stepping ---------------
+//
+// CONFIRMED INTERPRETER BUG in 2.0b6, isolated while writing this fixture:
+// a `return` inside a try block loses its value if the try has ANY finally
+// block -- even an empty one. Both calls below print "void", not "ok"/"recovered".
+//
+// Root cause is one line, BSHTryStatement.java:173:
+//     if (finallyBlock != null)
+//         ret = finallyBlock.eval(callstack, interpreter);
+// It overwrites `ret` unconditionally, discarding the ReturnControl produced by
+// the try/catch block. An empty finally evaluates to Primitive.VOID, which is
+// exactly what you see. Correct Java semantics would drop the finally block's
+// value unless the finally itself returns or throws.
+//
+// Minimal repro:  f() { try { return "ok"; } finally { } }  f();  ->  void
+//
+// Relevant to the debugger, not just a curiosity: ReturnControl propagation is
+// precisely what "step out" has to follow. If you build stepping on top of this,
+// expect the return value shown for a frame to be wrong in this shape -- and
+// don't spend a day blaming your agent.
+
+withFinally(fail) {
+    try {
+        if (fail) {
+            throw new RuntimeException("boom");               // BP:5
+        }
+        return "ok";
+    } catch (e) {
+        return "recovered";                                  // BP:6
+    } finally {
+        print("  finally ran (fail=" + fail + ")");          // BP:7
+    }
+}
+print("  withFinally(false) = " + withFinally(false));   // prints void (bug)
+print("  withFinally(true)  = " + withFinally(true));    // prints void (bug)
+
+// Same method without finally: returns correctly. Use the pair to prove the
+// bug is the finally block and nothing you did.
+withoutFinally(fail) {
+    try {
+        if (fail) {
+            throw new RuntimeException("boom");
+        }
+        return "ok";
+    } catch (e) {
+        return "recovered";                                  // BP:8
+    }
+}
+print("  withoutFinally(false) = " + withoutFinally(false));   // ok
+print("  withoutFinally(true)  = " + withoutFinally(true));    // recovered
+
+// ---- nested frames then throw: stack trace across several script frames --
+
+level3() { throw new RuntimeException("deep failure"); }      // BP:9
+level2() { return level3(); }                                // BP:10
+level1() { return level2(); }                                // BP:11
+
+try {
+    level1();
+} catch (e) {
+    print("  caught deep: " + e.getMessage());               // BP:12
+}
+
+// ---- EvalError territory: NOT a TargetError -----------------------------
+// These are interpreter-level refusals. A "break on exception" feature keyed on
+// Throwable will not see them the same way.
+
+try {
+    this.interpreter.eval("undefinedVariableXyz + 1");        // BP:13
+} catch (bsh.EvalError e) {
+    print("  EvalError (undefined): ok");
+}
+
+try {
+    this.interpreter.eval("Integer x = \"not a number\";");
+} catch (bsh.EvalError e) {
+    print("  EvalError (bad assign): ok");
+}
+
+// Parse error: thrown as ParseException from the eval loop, before any node
+// exists -- so there is no position node to hang a debugger event on.
+try {
+    this.interpreter.eval("if ( { this is not java");
+} catch (bsh.EvalError e) {
+    print("  EvalError (parse): ok");
+} catch (Throwable t) {
+    print("  parse threw: " + t.getClass().getName());
+}
+
+// ---- uncaught: leave this last, it aborts the script --------------------
+// Uncomment to test how your debugger reports an unhandled script exception.
+// print("about to fail");
+// level1();
+
+print("08_exceptions done");

@@ -13,6 +13,7 @@ no sources of its own.
 plugin/            :plugin              IntelliJ plugin -- language support and the debugger UI
 agent/instrument/  :agent:instrument    bsh-debug-agent -- premain + the ASM transformer, shaded
 agent/hook/        :agent:hook          bsh-debug-hook  -- the class instrumented BeanShell calls into
+agent/samples/     :agent:samples       debugger fixtures; nothing ships from here
 docs/              repository-wide docs
 ```
 

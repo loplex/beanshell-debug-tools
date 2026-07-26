@@ -1,0 +1,94 @@
+// Closures and This references: the scope chain a variables view must walk.
+//
+// Hook points exercised:
+//   This.java:208         invokeMethod on a scripted object
+//   BshMethod.java:204    the BshMethod found by This.invokeMethod
+//   NameSpace.getParent() the chain your "Scopes" panel has to render
+//
+// The point of this file: in BeanShell a "closure" is a NameSpace kept alive by
+// a This reference. There is no flat local-variable frame -- a variable can
+// live several parents up. A debugger that shows only callstack.top() will show
+// the wrong set of variables here.
+
+print("=== 04_closures ===");
+
+// Classic bsh counter closure: makeCounter() returns 'this', which is a This
+// wrapping the method's own NameSpace.
+makeCounter(start) {
+    count = start;                      // BP:1  lives in the method's NameSpace
+
+    increment() {
+        count++;                        // BP:2  resolves 'count' via parent scope
+        return count;                   // BP:3
+    }
+
+    reset() {
+        count = start;                  // BP:4  reads 'start' -- also a parent
+        return count;
+    }
+
+    get() {
+        return count;
+    }
+
+    return this;                        // BP:5  the NameSpace escapes here
+}
+
+c1 = makeCounter(10);
+c2 = makeCounter(100);                  // BP:6  second, independent NameSpace
+
+print("c1: " + c1.increment());         // BP:7  -> This.invokeMethod
+print("c1: " + c1.increment());
+print("c2: " + c2.increment());         // BP:8  must NOT see c1's count
+print("c1 get = " + c1.get());
+print("c1 reset = " + c1.reset());
+
+// Direct namespace poking: a debugger's "set variable" would do the equivalent.
+c1.count = 999;                         // BP:9   field-style write into a NameSpace
+print("c1 after write = " + c1.get());
+
+// this.caller / this.namespace -- how the test harness reports positions, and
+// a cheap way to see what your hook has access to.
+whereAmI() {
+    print("  line   = " + this.namespace.getInvocationLine());   // BP:10
+    print("  text   = " + this.namespace.getInvocationText());
+    print("  source = " + getSourceFileInfo());
+}
+whereAmI();
+
+// Nested closures: three levels of NameSpace parenting.
+outerScope() {
+    lvl = "outer";
+    middleScope() {
+        mid = "middle";
+        innerScope() {
+            // 'lvl' is two parents up, 'mid' one. Breakpoint here and check
+            // that your scope walk finds both.
+            return lvl + "/" + mid + "/inner";      // BP:11
+        }
+        return innerScope();
+    }
+    return middleScope();
+}
+print("nested = " + outerScope());
+
+// Indirect invocation through a This reference held in a variable. (Note: you
+// cannot take a bare method reference -- `h = c1.increment;` fails with
+// "Void assignment", because the name resolves as a variable, not a method.
+// Pass the This around instead.)
+ref = c1;
+print("indirect: " + ref.increment());  // BP:12
+
+// This passed as an argument and invoked inside another method: the frame's
+// NameSpace is c1's, not the caller's. A "variables" panel keyed on the calling
+// frame would show the wrong scope here.
+bump(target, times) {
+    last = 0;
+    for (k = 0; k < times; k++) {
+        last = target.increment();      // BP:13 crosses into another NameSpace
+    }
+    return last;
+}
+print("bumped: " + bump(c2, 3));
+
+print("04_closures done");

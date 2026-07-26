@@ -4,21 +4,8 @@ Ideas, known limitations and unfinished work worth revisiting, across the whole
 repository. Not scheduled — a parking lot so they are not lost to conversation
 history.
 
-Ordered by what blocks what, not by size.
-
----
-
-## Blocking a release
-
-### 1. Move the debugger fixtures into this repository
-
-`debug-samples/` (9 scripts + `DebugHost.java` + a README with a hook-point
-coverage table) lives in the BeanShell checkout at
-`~/SOURCE-git/beanshell/debug-samples`, in a `TMP debug samples` commit. They are
-debugger fixtures, not BeanShell tests. Once moved, revert that commit there.
-
-They cover interpreter hook coverage, closures, threads, scripted classes and an
-embedded-host driver — everything `plugin/samples/` does not.
+Ordered by what blocks what, not by size. **Nothing here blocks a release** — the
+agent ships inside the plugin and the fixtures are in the repository.
 
 ---
 
@@ -66,7 +53,7 @@ is why `c = this.caller; c.caller` is rejected.
 The protocol carries no thread id and the hook holds a global lock while suspended,
 so two script threads cannot be told apart or suspended independently. Needs a
 protocol change, so it belongs with DAP. Exercised by
-`debug-samples/06_callbacks_threads.bsh` and `DebugHost` scenario 5 — see item 1.
+`agent/samples/scripts/06_callbacks_threads.bsh` and `DebugHost` scenario 5.
 
 ---
 

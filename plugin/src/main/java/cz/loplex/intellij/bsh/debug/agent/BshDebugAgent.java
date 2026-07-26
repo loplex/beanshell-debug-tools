@@ -6,6 +6,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.Socket;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -104,22 +105,73 @@ public final class BshDebugAgent {
                 }
             }
             try {
-                Map<String, String> variables = readVariables(namespace);
+                // One frame, always. A rewritten script hands the hook a NameSpace, and a
+                // NameSpace does not know its caller -- so unlike the instrumenting agent, which
+                // is given the whole CallStack, this path cannot produce a stack at all. The frame
+                // count in the protocol is what lets both report honestly.
+                out.writeByte(EVT_STOPPED);
                 out.writeInt(line);
                 out.writeInt(callDepth());
-                out.writeInt(variables.size());
-                for (Map.Entry<String, String> entry : variables.entrySet()) {
-                    out.writeUTF(entry.getKey());
-                    out.writeUTF(entry.getValue());
-                }
+                out.writeInt(1);
+                out.writeUTF("script");
+                out.writeUTF("");
+                out.writeInt(line);
                 out.flush();
-                in.readByte(); // block until the IDE resumes this step
+                serveUntilResume(namespace);
             } catch (IOException ex) {
                 // The session dropped mid-run (e.g. the IDE stopped debugging). Detach
                 // quietly and let the script finish rather than aborting the host process.
                 System.err.println("[bsh-debug] debug session disconnected; continuing without debugging");
                 disabled = true;
                 close();
+            }
+        }
+    }
+
+    /*
+     * Protocol 2, the same wire format the instrumenting agent speaks -- see BshDebugProcess.
+     * This path only ever needs a subset: it reports one frame and serves variable requests for
+     * it, and it never receives breakpoints, so it keeps reporting every statement.
+     */
+    private static final int CMD_SCOPES = 0x04;
+    private static final int CMD_VARIABLES = 0x05;
+    private static final int EVT_STOPPED = 0x10;
+    private static final int EVT_SCOPES = 0x11;
+    private static final int EVT_VARIABLES = 0x12;
+    private static final int NO_HANDLE = 0;
+
+    /** The one handle this path issues: the frame's namespace. Variables are flat, so no more. */
+    private static final int NAMESPACE_HANDLE = 1;
+
+    /** Blocks until the IDE resumes, answering whatever it asks about the current frame first. */
+    private static void serveUntilResume(Object namespace) throws IOException {
+        while (true) {
+            int command = in.readByte() & 0xFF;
+            if (command == CMD_SCOPES) {
+                in.readInt(); // frame id; there is only ever frame 0 here
+                out.writeByte(EVT_SCOPES);
+                out.writeInt(1);
+                out.writeUTF("Locals");
+                out.writeInt(NAMESPACE_HANDLE);
+                out.flush();
+            } else if (command == CMD_VARIABLES) {
+                int handle = in.readInt();
+                Map<String, String> variables =
+                        handle == NAMESPACE_HANDLE ? readVariables(namespace) : Collections.<String, String>emptyMap();
+                out.writeByte(EVT_VARIABLES);
+                out.writeInt(variables.size());
+                for (Map.Entry<String, String> entry : variables.entrySet()) {
+                    out.writeUTF(entry.getKey());
+                    out.writeUTF(entry.getValue());
+                    out.writeUTF("");
+                    // No nested expansion on this path: it reads values as strings out of the
+                    // namespace and never holds the objects, so there is nothing to hand back.
+                    out.writeInt(NO_HANDLE);
+                }
+                out.flush();
+            } else {
+                // CMD_RESUME, and anything unrecognised, which must not be able to wedge a script.
+                return;
             }
         }
     }

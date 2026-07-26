@@ -64,8 +64,45 @@ def readn(f, n):
     return b
 
 
+CMD_RESUME = 0x01
+CMD_SET_BREAKPOINTS = 0x02
+CMD_SET_RUN_MODE = 0x03
+CMD_SCOPES = 0x04
+CMD_VARIABLES = 0x05
+
+EVT_STOPPED = 0x10
+EVT_SCOPES = 0x11
+EVT_VARIABLES = 0x12
+
+
+def rbyte(f):
+    return readn(f, 1)[0]
+
+
 def rint(f):
     return struct.unpack(">i", readn(f, 4))[0]
+
+
+def request_scopes(conn, f, frame_id):
+    """Ask for one frame's scopes. The reply is the next thing on the wire: the agent serves
+    requests from inside the same loop that waits for RESUME, so nothing can interleave."""
+    conn.sendall(struct.pack(">Bi", CMD_SCOPES, frame_id))
+    event = rbyte(f)
+    if event != EVT_SCOPES:
+        sys.exit(f"[mock-ide] expected EVT_SCOPES, got 0x{event:02x}")
+    return [(rutf(f), rint(f)) for _ in range(rint(f))]
+
+
+def request_variables(conn, f, handle):
+    conn.sendall(struct.pack(">Bi", CMD_VARIABLES, handle))
+    event = rbyte(f)
+    if event != EVT_VARIABLES:
+        sys.exit(f"[mock-ide] expected EVT_VARIABLES, got 0x{event:02x}")
+    out = {}
+    for _ in range(rint(f)):
+        name, value, type_name, child = rutf(f), rutf(f), rutf(f), rint(f)
+        out[name] = f"{value}" + (f" ({type_name}, +{child})" if child else "")
+    return out
 
 
 def rutf(f):
@@ -94,11 +131,11 @@ def parse_breakpoints(spec):
 
 
 def set_breakpoints_command(breakpoints):
-    message = struct.pack(">B", 0x02) + struct.pack(">i", len(breakpoints))
+    message = struct.pack(">B", CMD_SET_BREAKPOINTS) + struct.pack(">i", len(breakpoints))
     for path, line in breakpoints:
         message += wutf(path) + struct.pack(">i", line)
     # Also declare "running", so the agent filters instead of reporting every statement.
-    return message + struct.pack(">BB", 0x03, 0)
+    return message + struct.pack(">BB", CMD_SET_RUN_MODE, 0)
 
 
 def main():
@@ -120,22 +157,28 @@ def main():
     steps = 0
     try:
         while True:
+            event = rbyte(f)
+            if event != EVT_STOPPED:
+                sys.exit(f"[mock-ide] unexpected event 0x{event:02x} outside a request")
             line = rint(f)
             depth = rint(f)
-            count = rint(f)
-            variables = {}
-            for _ in range(count):
-                name = rutf(f)
-                variables[name] = rutf(f)
+            frames = [(rutf(f), rutf(f), rint(f)) for _ in range(rint(f))]
             steps += 1
-            print(f"[mock-ide] STEP line={line} depth={depth} vars={variables}", flush=True)
+            where = " < ".join(f"{name}:{ln}" for name, _src, ln in frames) or "<no frames>"
+            print(f"[mock-ide] STOPPED line={line} depth={depth} stack={where}", flush=True)
+
+            # Expand frame 0 the way an IDE does when the variables panel is open, which is also
+            # the only way to see any variable at all now that they are fetched on demand.
+            for scope, handle in request_scopes(conn, f, 0):
+                print(f"[mock-ide]   {scope}: {request_variables(conn, f, handle)}", flush=True)
+
             if not configured:
                 # Only possible now: the agent opens the connection on its first report, so
                 # that first statement is always seen unfiltered.
                 conn.sendall(set_breakpoints_command(breakpoints))
                 configured = True
                 print(f"[mock-ide] pushed {len(breakpoints)} breakpoint(s)", flush=True)
-            conn.sendall(b"\x01")  # resume
+            conn.sendall(bytes([CMD_RESUME]))
     except EOFError:
         print(f"[mock-ide] agent disconnected after {steps} step(s) (script done)", flush=True)
 

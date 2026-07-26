@@ -12,7 +12,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -60,6 +59,16 @@ public final class BshHook {
      * stays safely below: 20000 * 3 = 60000 &lt; 65535.
      */
     private static final int MAX_VALUE_LENGTH = 20000;
+
+    /**
+     * Upper bound on the children of one value. Lazy expansion removes the cost of unopened
+     * objects, not the cost of an opened one, and a million-element list would still stall the
+     * interpreter thread while it serialised.
+     */
+    private static final int MAX_CHILDREN = 1000;
+
+    /** Named rather than imported: the hook is on the bootstrap classpath and cannot see bsh. */
+    private static final String PRIMITIVE_CLASS = "bsh.Primitive";
 
     /**
      * Process exit code when a debug port is configured but the IDE server cannot be reached.
@@ -124,6 +133,36 @@ public final class BshHook {
     private static final int CMD_SET_BREAKPOINTS = 0x02;
     private static final int CMD_SET_RUN_MODE = 0x03;
 
+    /**
+     * Requests the IDE may issue while a statement is suspended, each answered with the matching
+     * {@code EVT_*} reply before the loop goes back to waiting.
+     *
+     * <p>They are served on the interpreter thread, from inside the same command loop that waits
+     * for {@link #CMD_RESUME}. That is not a shortcut: the thread is parked there anyway, it is
+     * the thread that owns the BeanShell state being inspected, and answering anywhere else would
+     * need a lock BeanShell does not offer.
+     */
+    private static final int CMD_SCOPES = 0x04;
+    private static final int CMD_VARIABLES = 0x05;
+
+    /*
+     * The agent-to-IDE direction is opcode-tagged as of protocol 2. It used to be a bare stream of
+     * statement reports, which left no room for a reply to travel back the other way.
+     *
+     * There is no negotiation and no fallback to the old shape, because there is nothing to
+     * negotiate with: the agent jar ships inside the plugin, so both ends are always the same
+     * build. The tools in plugin/tools speak this format too.
+     */
+    private static final int EVT_STOPPED = 0x10;
+    private static final int EVT_SCOPES = 0x11;
+    private static final int EVT_VARIABLES = 0x12;
+
+    /**
+     * Handle 0 is never issued, so the IDE can use it to mean "this value has no children" without
+     * a separate flag on every variable.
+     */
+    private static final int NO_HANDLE = 0;
+
     /** Not stepping. Any other mode means the IDE wants to see every statement. */
     private static final int MODE_RUN = 0;
 
@@ -171,7 +210,25 @@ public final class BshHook {
     private static Method nameSpaceGetVariableNames;
     private static Method nameSpaceGetVariable;
     private static Method nameSpaceGetParent;
+    private static Method callStackToArray;
+    private static Method nameSpaceGetName;
+    private static Field nameSpaceCallerInfoNode;
+    private static Class<?> nameSpaceClass;
     private static boolean reflectionFailed;
+
+    /**
+     * Objects the IDE may ask to expand, valid only for the current stop.
+     *
+     * <p>Discarded on every resume, which is the whole reason handles are safe: the IDE can never
+     * hold a reference into a script that has moved on, so there is no stale-object problem to
+     * solve and no cleanup protocol to get wrong. This mirrors DAP, where a
+     * {@code variablesReference} is explicitly invalid once execution continues.
+     */
+    private static final Map<Integer, Object> handles = new HashMap<Integer, Object>();
+    private static int nextHandle = 1;
+
+    /** The frames of the current stop, innermost first. Empty while running. */
+    private static Object[] currentFrames = new Object[0];
 
     static {
         int parsed = -1;
@@ -255,7 +312,7 @@ public final class BshHook {
                 drainPendingCommands();
                 return;
             }
-            report(line, callstack);
+            report(line, sourceFile, callstack);
         } catch (Throwable t) {
             // Never let a debugging problem change the behaviour of the debugged script.
             disabled = true;
@@ -409,6 +466,12 @@ public final class BshHook {
             case CMD_SET_RUN_MODE:
                 runMode = in.readByte() & 0xFF;
                 break;
+            case CMD_SCOPES:
+                writeScopes(in.readInt());
+                break;
+            case CMD_VARIABLES:
+                writeVariables(in.readInt());
+                break;
             default:
                 // RESUME, and anything unrecognised, which a future IDE must not be able to
                 // wedge the agent with. Treating it as a release is the safe reading: the worst
@@ -460,9 +523,9 @@ public final class BshHook {
         return slash < 0 ? sourceFile : sourceFile.substring(slash + 1);
     }
 
-    private static void report(int line, Object callstack) throws Exception {
-        Map<String, String> variables = readVariables(callstack);
+    private static void report(int line, String sourceFile, Object callstack) throws Exception {
         int depth = (Integer) callStackDepth.invoke(callstack);
+        Object[] frames = frames(callstack);
         synchronized (LOCK) {
             if (disabled) {
                 return;
@@ -476,13 +539,21 @@ public final class BshHook {
                     System.exit(EXIT_DEBUG_UNAVAILABLE);
                 }
             }
+            currentFrames = frames;
             try {
+                out.writeByte(EVT_STOPPED);
                 out.writeInt(line);
                 out.writeInt(depth);
-                out.writeInt(variables.size());
-                for (Map.Entry<String, String> entry : variables.entrySet()) {
-                    out.writeUTF(entry.getKey());
-                    out.writeUTF(entry.getValue());
+                out.writeInt(frames.length);
+                for (int i = 0; i < frames.length; i++) {
+                    out.writeUTF(frameName(frames[i]));
+                    // Frame 0 sits at the statement being reported; every outer frame sits at the
+                    // call site recorded by the frame below it. Reading getInvocationLine() off the
+                    // frame itself would be off by one level -- it answers "where was I called
+                    // from", which is a position in the *next* frame out.
+                    Object site = i == 0 ? null : callerInfoNode(frames[i - 1]);
+                    out.writeUTF(i == 0 ? nullToEmpty(sourceFile) : nullToEmpty(nodeSourceFile(site)));
+                    out.writeInt(i == 0 ? line : nodeLine(site));
                 }
                 out.flush();
                 readCommandsUntilResume();
@@ -490,45 +561,270 @@ public final class BshHook {
                 System.err.println("[bsh-agent] debug session disconnected; continuing without debugging");
                 disabled = true;
                 close();
+            } finally {
+                releaseHandles();
+                currentFrames = new Object[0];
             }
         }
     }
 
-    /**
-     * Collects variables visible at the current statement by walking the namespace scope chain
-     * outwards, inner scopes winning.
-     *
-     * <p>This is where the agent already differs from rewriting the script: a BeanShell closure
-     * is a {@code NameSpace} kept alive by a {@code This} reference, so a variable can live
-     * several parents above the current frame. Reporting only the innermost namespace — all a
-     * script-level hook can reach — shows the wrong set of variables inside any closure.
-     */
-    private static Map<String, String> readVariables(Object callstack) {
-        Map<String, String> variables = new LinkedHashMap<String, String>();
+    /** The call stack, innermost frame first. Empty rather than null if the shape is unexpected. */
+    private static Object[] frames(Object callstack) {
         try {
-            Object namespace = callStackTop.invoke(callstack);
-            while (namespace != null) {
-                Object names = nameSpaceGetVariableNames.invoke(namespace);
-                if (names instanceof String[]) {
-                    for (String name : (String[]) names) {
-                        if (name == null || name.equals("bsh") || variables.containsKey(name)) {
-                            continue;
-                        }
-                        Object value;
-                        try {
-                            value = nameSpaceGetVariable.invoke(namespace, name);
-                        } catch (Throwable t) {
-                            value = "<unavailable>";
-                        }
-                        variables.put(name, truncate(String.valueOf(value)));
-                    }
-                }
-                namespace = nameSpaceGetParent.invoke(namespace);
+            Object array = callStackToArray.invoke(callstack);
+            if (array instanceof Object[]) {
+                return (Object[]) array;
             }
         } catch (Throwable ignored) {
-            // Report whatever was gathered before the failure.
+            // Fall through: a stack we cannot read is reported as no stack, not as a failure.
         }
-        return variables;
+        return new Object[0];
+    }
+
+    private static String frameName(Object namespace) {
+        try {
+            return nullToEmpty((String) nameSpaceGetName.invoke(namespace));
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private static Object callerInfoNode(Object namespace) {
+        if (nameSpaceCallerInfoNode == null) {
+            return null;
+        }
+        try {
+            return nameSpaceCallerInfoNode.get(namespace);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static String nodeSourceFile(Object node) {
+        if (node == null) {
+            return null;
+        }
+        try {
+            return (String) nodeGetSourceFile.invoke(node);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** -1 where there is no script position, which is also what bsh uses for "entered from Java". */
+    private static int nodeLine(Object node) {
+        if (node == null) {
+            return -1;
+        }
+        try {
+            return (Integer) nodeGetLineNumber.invoke(node);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    /**
+     * Answers {@link #CMD_SCOPES}: the scopes of one frame, each a handle the IDE can expand.
+     *
+     * <p>One scope per frame today. The shape is DAP's rather than the simplest possible one
+     * because splitting locals from a closure's captured namespace is a presentation change here
+     * and a protocol change if the level does not exist.
+     */
+    private static void writeScopes(int frameId) throws IOException {
+        Object namespace = frameId >= 0 && frameId < currentFrames.length ? currentFrames[frameId] : null;
+        out.writeByte(EVT_SCOPES);
+        if (namespace == null) {
+            out.writeInt(0);
+        } else {
+            out.writeInt(1);
+            out.writeUTF("Locals");
+            out.writeInt(handleFor(namespace));
+        }
+        out.flush();
+    }
+
+    /**
+     * Answers {@link #CMD_VARIABLES}: the children of one handle, each with a handle of its own
+     * when it can be expanded further.
+     */
+    private static void writeVariables(int handle) throws IOException {
+        List<String[]> children;
+        List<Object> values;
+        Object target = handles.get(Integer.valueOf(handle));
+        children = new ArrayList<String[]>();
+        values = new ArrayList<Object>();
+        try {
+            if (isNameSpace(target)) {
+                collectNamespace(target, children, values);
+            } else if (target != null) {
+                collectValue(target, children, values);
+            }
+        } catch (Throwable ignored) {
+            // Send whatever was gathered; an unreadable object is not worth failing the session.
+        }
+        out.writeByte(EVT_VARIABLES);
+        out.writeInt(children.size());
+        for (int i = 0; i < children.size(); i++) {
+            String[] entry = children.get(i);
+            out.writeUTF(entry[0]);
+            out.writeUTF(entry[1]);
+            out.writeUTF(entry[2]);
+            out.writeInt(expandable(values.get(i)) ? handleFor(values.get(i)) : NO_HANDLE);
+        }
+        out.flush();
+    }
+
+    /**
+     * Variables visible in a frame, walking the namespace scope chain outwards, inner winning.
+     *
+     * <p>This is where the agent differs from rewriting the script: a BeanShell closure is a
+     * {@code NameSpace} kept alive by a {@code This} reference, so a variable can live several
+     * parents above the current frame. Reporting only the innermost namespace — all a script-level
+     * hook can reach — shows the wrong set of variables inside any closure.
+     */
+    private static void collectNamespace(Object namespace, List<String[]> children, List<Object> values)
+            throws Exception {
+        Set<String> seen = new HashSet<String>();
+        while (namespace != null) {
+            Object names = nameSpaceGetVariableNames.invoke(namespace);
+            if (names instanceof String[]) {
+                for (String name : (String[]) names) {
+                    if (name == null || name.equals("bsh") || !seen.add(name)) {
+                        continue;
+                    }
+                    Object value;
+                    try {
+                        value = nameSpaceGetVariable.invoke(namespace, name);
+                    } catch (Throwable t) {
+                        value = "<unavailable>";
+                    }
+                    add(children, values, name, value);
+                }
+            }
+            namespace = nameSpaceGetParent.invoke(namespace);
+        }
+    }
+
+    /** Children of an ordinary value: array elements, collection entries, map entries, or fields. */
+    private static void collectValue(Object target, List<String[]> children, List<Object> values) {
+        if (target.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(target);
+            for (int i = 0; i < length; i++) {
+                add(children, values, "[" + i + "]", java.lang.reflect.Array.get(target, i));
+            }
+            return;
+        }
+        if (target instanceof Map) {
+            int i = 0;
+            for (Object o : ((Map<?, ?>) target).entrySet()) {
+                Map.Entry<?, ?> entry = (Map.Entry<?, ?>) o;
+                add(children, values, String.valueOf(entry.getKey()), entry.getValue());
+                if (++i >= MAX_CHILDREN) {
+                    break;
+                }
+            }
+            return;
+        }
+        if (target instanceof Iterable) {
+            int i = 0;
+            for (Object element : (Iterable<?>) target) {
+                add(children, values, "[" + i + "]", element);
+                if (++i >= MAX_CHILDREN) {
+                    break;
+                }
+            }
+            return;
+        }
+        for (Class<?> type = target.getClass(); type != null && type != Object.class; type = type.getSuperclass()) {
+            Field[] fields = type.getDeclaredFields();
+            for (Field field : fields) {
+                if (field.isSynthetic() || java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                    continue;
+                }
+                Object value;
+                try {
+                    field.setAccessible(true);
+                    value = field.get(target);
+                } catch (Throwable t) {
+                    value = "<unavailable>";
+                }
+                add(children, values, field.getName(), value);
+                if (children.size() >= MAX_CHILDREN) {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static void add(List<String[]> children, List<Object> values, String name, Object value) {
+        children.add(new String[] { name, truncate(render(value)), typeName(value) });
+        values.add(value);
+    }
+
+    /**
+     * Whether a value is worth a handle. Leaves are not given one, so the IDE shows no expander
+     * where there is nothing behind it.
+     */
+    private static boolean expandable(Object value) {
+        if (value == null || value instanceof String || value instanceof Number
+                || value instanceof Boolean || value instanceof Character || value instanceof Enum) {
+            return false;
+        }
+        // bsh.Primitive wraps every scripted int, boolean and so on, including NULL and VOID. Its
+        // fields are the wrapper's, not the user's, so offering an expander on `x = 42` would show
+        // BeanShell's plumbing where the value already says everything.
+        if (PRIMITIVE_CLASS.equals(value.getClass().getName())) {
+            return false;
+        }
+        if (value.getClass().isArray()) {
+            return java.lang.reflect.Array.getLength(value) > 0;
+        }
+        if (value instanceof Map) {
+            return !((Map<?, ?>) value).isEmpty();
+        }
+        return true;
+    }
+
+    /**
+     * A value's own rendering, still a {@code toString()} but only ever fetched for values the IDE
+     * actually looked at, rather than for every variable on every step.
+     */
+    private static String render(Object value) {
+        try {
+            return String.valueOf(value);
+        } catch (Throwable t) {
+            return "<toString() threw " + t.getClass().getName() + ">";
+        }
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "" : simpleName(value);
+    }
+
+    private static boolean isNameSpace(Object candidate) {
+        return candidate != null && nameSpaceClass != null && nameSpaceClass.isInstance(candidate);
+    }
+
+    /** Handles are identity-based, so expanding the same object twice does not grow the table. */
+    private static int handleFor(Object value) {
+        for (Map.Entry<Integer, Object> entry : handles.entrySet()) {
+            if (entry.getValue() == value) {
+                return entry.getKey().intValue();
+            }
+        }
+        int handle = nextHandle++;
+        handles.put(Integer.valueOf(handle), value);
+        return handle;
+    }
+
+    private static void releaseHandles() {
+        handles.clear();
+        // Handles keep counting up rather than restarting at 1, so a reply that crosses a resume
+        // cannot be mistaken for an answer about a different object.
     }
 
     /**
@@ -558,11 +854,21 @@ public final class BshHook {
                 Class<?> callStackClass = callstack.getClass();
                 callStackDepth = accessible(callStackClass.getMethod("depth"));
                 callStackTop = accessible(callStackClass.getMethod("top"));
+                callStackToArray = accessible(callStackClass.getMethod("toArray"));
 
-                Class<?> nameSpaceClass = callStackTop.invoke(callstack).getClass();
+                nameSpaceClass = callStackTop.invoke(callstack).getClass();
                 nameSpaceGetVariableNames = accessible(nameSpaceClass.getMethod("getVariableNames"));
                 nameSpaceGetVariable = accessible(nameSpaceClass.getMethod("getVariable", String.class));
                 nameSpaceGetParent = accessible(nameSpaceClass.getMethod("getParent"));
+                nameSpaceGetName = accessible(nameSpaceClass.getMethod("getName"));
+                // Package-private: the field holding the node a frame was invoked from. Optional --
+                // without it the stack still reports, just with every frame at the current line.
+                try {
+                    nameSpaceCallerInfoNode = nameSpaceClass.getDeclaredField("callerInfoNode");
+                    nameSpaceCallerInfoNode.setAccessible(true);
+                } catch (Throwable t) {
+                    nameSpaceCallerInfoNode = null;
+                }
                 return true;
             } catch (Throwable t) {
                 reflectionFailed = true;

@@ -9,44 +9,24 @@ agent ships inside the plugin and the fixtures are in the repository.
 
 ---
 
-## The values problem — an object-handle model in DAP vocabulary
+## `evaluate` and `setVariable`
 
-This is the user-visible one, and it is where the next protocol iteration starts.
+The remaining two verbs of DAP's variable vocabulary. Protocol 2 has the shape for
+them — the IDE already sends requests and reads replies while suspended, so each is
+one opcode and one reply, not a reframing.
 
-Each variable is reported as a single `toString()` string (`readVariables` →
-`writeUTF`). Simple and robust — no dangling references to objects living in the
-foreign JVM — but limited three ways:
+`evaluate(frameId, expression)` is what the Watches panel and the Evaluate dialog
+need. It is reachable: the hook holds the `Interpreter`, so
+`interpreter.eval(expr, namespace)` works, verified. The result gets a handle like
+any other value, so a watched expression expands the same way a variable does. Two
+things to get right — the re-entrancy guard already covers evaluation running
+instrumented code, and a user expression that throws must be reported as a failed
+evaluation rather than disabling the session.
 
-- **No structure.** Nested objects and collections cannot be expanded in the
-  Variables panel; the developer sees one flat line per variable.
-- **Hard size cap.** `DataOutputStream.writeUTF` tops out at 65535 bytes, so values
-  are truncated (`MAX_VALUE_LENGTH`) and large objects lose their tail.
-- **Eager, per-step.** Every value is serialized on every step, even when the
-  developer never looks at it.
+`setVariable(handle, name, expression)` is the same machinery in reverse, plus
+`XValueModifier` on the IDE side.
 
-The fix is not more plumbing but an object-handle model: send lightweight handles
-and let the IDE request a specific object's members on demand. **That maps 1:1 onto
-DAP's `variablesReference`**, so adopt DAP's vocabulary — `stackTrace` → `scopes` →
-`variables` with lazy children, `setVariable`, `evaluate` — even before adopting
-DAP's transport, and the design is done once.
-
-Evaluation is already reachable: the hook holds the `Interpreter`, so
-`interpreter.eval(expr, namespace)` works. Verified.
-
-Touches both the agent and the IDE side (`BshDebugProcess`, `BshDebugFrames`), and
-it is a protocol change — a deliberate iteration rather than a tweak.
-
-## Multi-frame stack
-
-Deliberately deferred to land with the DAP vocabulary above. The agent already
-receives the `CallStack`, so `toArray()` plus `getInvocationLine()` per frame gives
-the whole stack.
-
-Worth noting this was impossible under the old `step(line, namespace)` signature at
-all, since a `NameSpace` does not know its caller — `Name.java:82-84`: *"This
-references do not really know anything about their depth on the call stack"*.
-`.caller` works by counting literal occurrences and indexing the `CallStack`, which
-is why `c = this.caller; c.caller` is rejected.
+Neither is available on the rewriting fallback: it holds no `Interpreter`.
 
 ## Threads
 
@@ -70,7 +50,8 @@ DAP** ([IJPL-83441] is open), and [LSP4IJ] supplies a general DAP client that la
 `Pause`, `ExceptionInfo`, `SetFunctionBreakpoints` and the `Thread` event — that
 last gap being exactly the threads item above.
 
-Adopting the vocabulary first (see the values problem) is what makes this a
+Having adopted the vocabulary first — protocol 2 is `stackTrace`/`scopes`/
+`variables` with lazy handles under different names — is what makes this a
 transport swap rather than a redesign. A DAP-speaking agent is a debug adapter any
 DAP client can attach to, which is why the agent stays an independently publishable
 subproject rather than a source set of the plugin.

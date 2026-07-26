@@ -5,9 +5,16 @@ import com.intellij.psi.PsiErrorElement
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import cz.loplex.intellij.bsh.debug.BshDebugInstrumenter
+import cz.loplex.intellij.bsh.debug.CMD_RESUME
+import cz.loplex.intellij.bsh.debug.CMD_SCOPES
+import cz.loplex.intellij.bsh.debug.CMD_VARIABLES
+import cz.loplex.intellij.bsh.debug.EVT_SCOPES
+import cz.loplex.intellij.bsh.debug.EVT_STOPPED
+import cz.loplex.intellij.bsh.debug.EVT_VARIABLES
 import cz.loplex.intellij.bsh.debug.agent.BshDebugAgent
 import cz.loplex.intellij.bsh.psi.BshFile
 import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.EOFException
 import java.io.File
 import java.net.ServerSocket
@@ -68,16 +75,41 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
 
             server.accept().use { socket ->
                 val input = DataInputStream(socket.getInputStream())
-                val out = socket.getOutputStream()
+                val out = DataOutputStream(socket.getOutputStream())
                 try {
                     while (true) {
+                        assertEquals(EVT_STOPPED, input.readByte().toInt() and 0xFF)
                         val line = input.readInt()
                         val depth = input.readInt()
-                        val count = input.readInt()
+                        // One frame from this path: a rewritten script gives the hook a NameSpace,
+                        // which does not know its caller.
+                        assertEquals(1, input.readInt())
+                        input.readUTF()
+                        input.readUTF()
+                        input.readInt()
+
+                        // Variables are pulled now, so ask the way the IDE does.
+                        out.writeByte(CMD_SCOPES)
+                        out.writeInt(0)
+                        out.flush()
+                        assertEquals(EVT_SCOPES, input.readByte().toInt() and 0xFF)
+                        val scopes = (0 until input.readInt()).map { input.readUTF() to input.readInt() }
+
                         val vars = LinkedHashMap<String, String>()
-                        repeat(count) { vars[input.readUTF()] = input.readUTF() }
+                        for ((_, handle) in scopes) {
+                            out.writeByte(CMD_VARIABLES)
+                            out.writeInt(handle)
+                            out.flush()
+                            assertEquals(EVT_VARIABLES, input.readByte().toInt() and 0xFF)
+                            repeat(input.readInt()) {
+                                val name = input.readUTF()
+                                vars[name] = input.readUTF()
+                                input.readUTF()
+                                input.readInt()
+                            }
+                        }
                         frames.add(Frame(line, depth, vars))
-                        out.write(1) // resume
+                        out.writeByte(CMD_RESUME)
                         out.flush()
                     }
                 } catch (_: EOFException) {

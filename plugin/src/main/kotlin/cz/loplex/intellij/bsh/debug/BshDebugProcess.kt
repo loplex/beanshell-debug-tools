@@ -17,17 +17,18 @@ import java.io.DataOutputStream
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
-/*
- * The return channel. The single byte that used to mean "resume" is CMD_RESUME, and other
- * commands may precede it, so an agent speaking only the original protocol is unaffected.
+/**
+ * How long a variables request waits before giving up.
+ *
+ * Only reachable if the agent died between the stop and the expansion, since it answers from the
+ * loop it is already parked in. Bounded anyway: the platform calls `computeChildren` off the UI
+ * thread, but an unbounded wait would still leak a stuck thread per expansion.
  */
-private const val CMD_RESUME = 0x01
-private const val CMD_SET_BREAKPOINTS = 0x02
-private const val CMD_SET_RUN_MODE = 0x03
-private const val MODE_RUN = 0
-private const val MODE_STEPPING = 1
+private const val REQUEST_TIMEOUT_MS = 5_000L
 
 /**
  * Drives a BeanShell debug session. The forked JVM runs the script -- rewritten with hook calls,
@@ -35,9 +36,16 @@ private const val MODE_STEPPING = 1
  * back to [server]; each reported statement is either paused (breakpoint / stepping) or released
  * immediately.
  *
- * Framing, agent to IDE: `int line, int callDepth, int varCount, (utf name, utf value)*`.
+ * Framing, agent to IDE: [EVT_STOPPED] `int line, int callDepth, int frameCount,
+ * (utf name, utf sourceFile, int line)*`, plus [EVT_SCOPES] / [EVT_VARIABLES] answering a request.
  * IDE to agent: [CMD_RESUME], optionally preceded by [CMD_SET_BREAKPOINTS] and
- * [CMD_SET_RUN_MODE] when [pushFilterToAgent] lets the agent filter for itself.
+ * [CMD_SET_RUN_MODE] when [pushFilterToAgent] lets the agent filter for itself, and
+ * [CMD_SCOPES] / [CMD_VARIABLES] while suspended.
+ *
+ * Variables are pulled rather than pushed. The agent hands out an opaque handle per expandable
+ * value, valid only until the next resume, which is what lets a nested object be opened one level
+ * at a time instead of every variable being serialised on every step. It is deliberately DAP's
+ * `variablesReference` model, so adopting DAP later is a change of encoding rather than of design.
  */
 class BshDebugProcess(
     session: XDebugSession,
@@ -67,7 +75,7 @@ class BshDebugProcess(
      * reporting everything as before.
      */
     private val pushFilterToAgent: Boolean = false,
-) : XDebugProcess(session) {
+) : XDebugProcess(session), BshValueSource {
 
     private val editorsProvider = BshDebuggerEditorsProvider()
     private val breakpoints = ConcurrentHashMap<Int, XLineBreakpoint<*>>()
@@ -82,6 +90,16 @@ class BshDebugProcess(
     private var socket: Socket? = null
     private var output: OutputStream? = null
     private var commands: DataOutputStream? = null
+
+    /**
+     * Hands a reply from the reader thread to whichever thread asked for it.
+     *
+     * Capacity one, guarded by [requestLock], because only one request is ever in flight: the
+     * agent answers from inside the loop where it waits to be resumed, so replies arrive in the
+     * order the requests were sent and nothing else can appear between them.
+     */
+    private val responses = ArrayBlockingQueue<Any>(1)
+    private val requestLock = Any()
 
     override fun createConsole(): ExecutionConsole {
         val console = TextConsoleBuilderFactory.getInstance().createBuilder(session.project).console
@@ -186,19 +204,64 @@ class BshDebugProcess(
             pushFilter()
             val input = DataInputStream(accepted.getInputStream())
             while (!stopped) {
-                val line = input.readInt()
-                val depth = input.readInt()
-                val count = input.readInt()
-                val variables = LinkedHashMap<String, String>()
-                repeat(count) { variables[input.readUTF()] = input.readUTF() }
-                handleStep(line, depth, variables)
+                when (input.readByte().toInt() and 0xFF) {
+                    EVT_STOPPED -> readStopped(input)
+                    EVT_SCOPES -> responses.offer(readScopesReply(input))
+                    EVT_VARIABLES -> responses.offer(readVariablesReply(input))
+                    // An opcode we do not know means the stream is no longer framed the way we
+                    // think it is, and every later read would be garbage. Stop rather than guess.
+                    else -> return
+                }
             }
         } catch (_: Exception) {
             // socket closed or script finished
         }
     }
 
-    private fun handleStep(line: Int, depth: Int, variables: Map<String, String>) {
+    private fun readStopped(input: DataInputStream) {
+        val line = input.readInt()
+        val depth = input.readInt()
+        val frames = (0 until input.readInt()).map { index ->
+            BshFrameInfo(index, input.readUTF(), input.readUTF(), input.readInt())
+        }
+        handleStep(line, depth, frames)
+    }
+
+    private fun readScopesReply(input: DataInputStream): ScopesReply =
+        ScopesReply((0 until input.readInt()).map { input.readUTF() to input.readInt() })
+
+    private fun readVariablesReply(input: DataInputStream): VariablesReply =
+        VariablesReply(
+            (0 until input.readInt()).map {
+                BshVariable(input.readUTF(), input.readUTF(), input.readUTF(), input.readInt())
+            },
+        )
+
+    private class ScopesReply(val scopes: List<Pair<String, Int>>)
+    private class VariablesReply(val variables: List<BshVariable>)
+
+    override fun scopes(frameId: Int): List<Pair<String, Int>> =
+        (exchange { it.writeByte(CMD_SCOPES); it.writeInt(frameId) } as? ScopesReply)?.scopes.orEmpty()
+
+    override fun variables(handle: Int): List<BshVariable> =
+        (exchange { it.writeByte(CMD_VARIABLES); it.writeInt(handle) } as? VariablesReply)?.variables.orEmpty()
+
+    /** Sends one request and waits for its reply. Serialised: one request is in flight at a time. */
+    private fun exchange(write: (DataOutputStream) -> Unit): Any? = synchronized(requestLock) {
+        responses.clear()
+        val out = commands ?: return null
+        try {
+            synchronized(out) {
+                write(out)
+                out.flush()
+            }
+        } catch (_: Exception) {
+            return null
+        }
+        return responses.poll(REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun handleStep(line: Int, depth: Int, frames: List<BshFrameInfo>) {
         currentDepth = depth
         val sourceLine = lineMapper(line)
         val breakpoint = breakpoints[sourceLine]
@@ -206,13 +269,30 @@ class BshDebugProcess(
         if (hitRunTo || BshStepLogic.shouldPause(mode, stepDepth, depth, breakpoint != null)) {
             mode = BshStepMode.RUN
             runToLine = null
-            val context = BshSuspendContext(sourceLine, variables, sourceFile)
+            val context = BshSuspendContext(frames, sourceFile, ::frameLine, this)
             if (breakpoint != null) session.breakpointReached(breakpoint, null, context)
             else session.positionReached(context)
         } else {
             releaseAgent()
         }
     }
+
+    /**
+     * Where a frame sits in [sourceFile], or -1 when it sits somewhere else.
+     *
+     * The innermost frame is always mapped, which is what keeps the injected-pom path working:
+     * there [lineMapper] translates a snippet line to a pom.xml line, and the agent reports the
+     * snippet's own name for the file. Outer frames are only mapped when they really are in this
+     * file -- a `source()`d script or the frame entered from Java has no position here.
+     */
+    private fun frameLine(frame: BshFrameInfo): Int = when {
+        frame.id == 0 -> lineMapper(frame.line)
+        frame.line >= 1 && inSourceFile(frame.sourceFile) -> lineMapper(frame.line)
+        else -> -1
+    }
+
+    private fun inSourceFile(reported: String): Boolean =
+        reported.isNotEmpty() && (reported.endsWith(sourceFile.name) || sourceFile.path.endsWith(reported))
 
     private inner class BshBreakpointHandler :
         XBreakpointHandler<XLineBreakpoint<XBreakpointProperties<*>>>(BshLineBreakpointType::class.java) {

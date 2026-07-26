@@ -107,15 +107,30 @@ breakpoints, script variables) and a **Java** session (breakpoints in the Java
 code the script invokes). Without the Java plugin, JDWP is not added and only the
 BeanShell debugger runs.
 
+## Variables and frames
+
+Both are fetched on demand. A stop reports only the stack — one entry per frame,
+innermost first — and the IDE asks for a frame's scopes when the user selects it,
+then for a value's children when the user expands it. `BshStackFrame` and
+`BshValue` in `debug/BshDebugFrames.kt` are thin: the work is the request, and
+`BshDebugProcess` implements `BshValueSource` to make it.
+
+Nested objects, collections, maps and arrays therefore expand in the Variables
+panel, and a value nobody looks at is never serialised.
+
+**The two mechanisms differ here**, and the protocol lets them say so. The agent is
+handed the whole `CallStack`, so it reports every frame. The rewriting fallback is
+handed a single `NameSpace`, which does not know its caller, so it reports one
+frame and offers no nested expansion — it reads values out of the namespace as
+strings and never holds the objects.
+
 ## Limitations
 
-- Variable values are shown as their `toString()`; there is no expression
-  evaluation against the live namespace yet.
-- The BeanShell stack view is single-frame (the current statement); the Java
-  session provides the full JVM stack when stopped in Java code.
+- No expression evaluation against the live namespace, and no editing a value in
+  place. The hook holds the `Interpreter`, so `interpreter.eval(expr, namespace)`
+  works — the protocol just has no opcode for it yet.
 - The protocol carries no thread id and the hook holds a global lock while
   suspended, so two script threads cannot be told apart or suspended
   independently.
 
-All three are tracked in [`docs/FUTURE_WORK.md`](../../docs/FUTURE_WORK.md), and
-all three are deferred to land together with DAP's vocabulary.
+Both are tracked in [`docs/FUTURE_WORK.md`](../../docs/FUTURE_WORK.md).

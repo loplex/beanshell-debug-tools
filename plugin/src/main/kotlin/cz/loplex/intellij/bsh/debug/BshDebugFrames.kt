@@ -22,47 +22,112 @@ import com.intellij.xdebugger.frame.XValueNode
 import com.intellij.xdebugger.frame.XValuePlace
 import cz.loplex.intellij.bsh.BshFileType
 
-/** Suspend state reported by the agent: one line and the visible variables. */
+/** One frame as the agent reports it: a name, where it is, and its index in the stack. */
+data class BshFrameInfo(val id: Int, val name: String, val sourceFile: String, val line: Int)
+
+/** One variable as the agent reports it. [childHandle] is 0 when there is nothing to expand. */
+data class BshVariable(val name: String, val value: String, val type: String, val childHandle: Int)
+
+/**
+ * Fetches on demand what the agent no longer pushes.
+ *
+ * Every call blocks the thread it is made on until the agent answers, which is what the platform
+ * expects: it calls `computeChildren` off the UI thread precisely so an implementation may go and
+ * ask something slow.
+ */
+interface BshValueSource {
+    /** Scopes of one frame, as `name to handle`. */
+    fun scopes(frameId: Int): List<Pair<String, Int>>
+
+    fun variables(handle: Int): List<BshVariable>
+}
+
 class BshSuspendContext(
-    line: Int,
-    variables: Map<String, String>,
+    frames: List<BshFrameInfo>,
     scriptFile: VirtualFile,
+    lineOf: (BshFrameInfo) -> Int,
+    source: BshValueSource,
 ) : XSuspendContext() {
-    private val stack = BshExecutionStack(line, variables, scriptFile)
+    private val stack = BshExecutionStack(frames, scriptFile, lineOf, source)
     override fun getActiveExecutionStack(): XExecutionStack = stack
 }
 
 class BshExecutionStack(
-    line: Int,
-    variables: Map<String, String>,
+    frames: List<BshFrameInfo>,
     scriptFile: VirtualFile,
+    lineOf: (BshFrameInfo) -> Int,
+    source: BshValueSource,
 ) : XExecutionStack("BeanShell") {
-    private val frame = BshStackFrame(line, variables, scriptFile)
-    override fun getTopFrame(): XStackFrame = frame
+
+    private val frames = frames.map { BshStackFrame(it, scriptFile, lineOf(it), source) }
+
+    override fun getTopFrame(): XStackFrame? = frames.firstOrNull()
+
     override fun computeStackFrames(firstFrameIndex: Int, container: XStackFrameContainer) {
-        container.addStackFrames(if (firstFrameIndex == 0) listOf(frame) else emptyList(), true)
+        container.addStackFrames(frames.drop(firstFrameIndex), true)
     }
 }
 
 class BshStackFrame(
-    private val line: Int,
-    private val variables: Map<String, String>,
+    private val info: BshFrameInfo,
     private val scriptFile: VirtualFile,
+    private val line: Int,
+    private val source: BshValueSource,
 ) : XStackFrame() {
 
+    /**
+     * Null for a frame outside the file being debugged — a `source()`d script, or the synthetic
+     * outermost frame entered from Java, which bsh reports at line -1. The frame still appears in
+     * the stack; it just cannot be navigated to.
+     */
     override fun getSourcePosition(): XSourcePosition? =
-        XDebuggerUtil.getInstance().createPosition(scriptFile, line - 1)
+        if (line >= 1) XDebuggerUtil.getInstance().createPosition(scriptFile, line - 1) else null
 
     override fun computeChildren(node: XCompositeNode) {
         val children = XValueChildrenList()
-        for ((name, value) in variables) children.add(name, BshValue(value))
+        for ((_, handle) in source.scopes(info.id)) {
+            for (variable in source.variables(handle)) {
+                children.add(variable.name, BshValue(variable, source))
+            }
+        }
         node.addChildren(children, true)
+    }
+
+    /** What the Frames panel shows. `global` is bsh's name for the script's top level. */
+    override fun customizePresentation(component: com.intellij.ui.ColoredTextContainer) {
+        val where = if (line >= 1) ":$line" else ""
+        component.append(
+            (info.name.ifEmpty { "?" }) + where,
+            com.intellij.ui.SimpleTextAttributes.REGULAR_ATTRIBUTES,
+        )
+        component.setIcon(AllIcons.Debugger.Frame)
     }
 }
 
-class BshValue(private val value: String) : XValue() {
+class BshValue(
+    private val variable: BshVariable,
+    private val source: BshValueSource,
+) : XValue() {
+
     override fun computePresentation(node: XValueNode, place: XValuePlace) {
-        node.setPresentation(AllIcons.Nodes.Variable, null, value, false)
+        node.setPresentation(
+            AllIcons.Nodes.Variable,
+            variable.type.ifEmpty { null },
+            variable.value,
+            variable.childHandle != NO_HANDLE,
+        )
+    }
+
+    override fun computeChildren(node: XCompositeNode) {
+        if (variable.childHandle == NO_HANDLE) {
+            node.addChildren(XValueChildrenList.EMPTY, true)
+            return
+        }
+        val children = XValueChildrenList()
+        for (child in source.variables(variable.childHandle)) {
+            children.add(child.name, BshValue(child, source))
+        }
+        node.addChildren(children, true)
     }
 }
 

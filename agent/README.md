@@ -149,24 +149,40 @@ different digits.
 
 ## 3. Protocol
 
-Agent to IDE, per reported statement:
+Version 2. Both directions are opcode-tagged.
 
 ```
-int line, int callDepth, int varCount, (utf name, utf value)*
+agent -> IDE
+  0x10 STOPPED    int line, int callDepth, int frameCount,
+                  (utf name, utf sourceFile, int line)*     innermost frame first
+  0x11 SCOPES     int count, (utf name, int handle)*        answers 0x04
+  0x12 VARIABLES  int count,
+                  (utf name, utf value, utf type, int childHandle)*   answers 0x05
+
+IDE -> agent
+  0x01 RESUME
+  0x02 SET_BREAKPOINTS  int count, (utf file, int line)*
+  0x03 SET_RUN_MODE     byte mode                           0 = running
+  0x04 SCOPES           int frameId                         only while suspended
+  0x05 VARIABLES        int handle                          only while suspended
 ```
 
-IDE to agent:
+**Variables are pulled, not pushed.** Each expandable value carries an opaque
+handle, and the IDE asks for its children only if the user opens it. A handle is
+valid until the next resume and the table is dropped there, so the IDE can never
+hold a reference into a script that has moved on — no stale-object problem to
+solve, no cleanup protocol to get wrong. That is
+[DAP's `variablesReference`](https://microsoft.github.io/debug-adapter-protocol/specification#Types_Variable)
+in a smaller encoding: adopting DAP later changes the serialisation, not the design.
 
-```
-0x01                                      resume
-0x02  int count  (utf file, int line)*    set breakpoints
-0x03  byte mode                           set run mode, 0 = running
-```
+Requests are served **on the interpreter thread**, from inside the same loop that
+waits for `RESUME`. Not a shortcut: that thread is parked there anyway, it owns
+the BeanShell state being inspected, and answering from anywhere else would need a
+lock BeanShell does not offer. It also means a reply is always the next thing on
+the wire, so neither end needs request ids.
 
-Backward compatible in both directions: the byte that used to mean "resume" is
-`0x01`, other commands merely precede it, and the agent reports **everything**
-until it is given a breakpoint set at least once — so an IDE that configures
-nothing is un-optimised rather than blind.
+There is no version negotiation, because there is nothing to negotiate with: the
+agent jar ships inside the plugin, so both ends are always the same build.
 
 Two consequences to keep in mind. The **first statement is always reported**,
 because the agent opens the connection on its first report and cannot know the
@@ -174,8 +190,17 @@ breakpoints sooner. And filtering is only enabled where the line mapping is the
 identity (the standalone `.bsh` path): breakpoints must be expressed in the lines
 the agent reports, and the injected-pom mapper has no inverse.
 
-This protocol is deliberately provisional. The next step is to adopt DAP's
-vocabulary — see [`docs/FUTURE_WORK.md`](../docs/FUTURE_WORK.md).
+### The frame positions are not where you would first look
+
+`NameSpace.getInvocationLine()` answers "where was I called *from*", so it
+describes a position in the next frame out, not in its own. Frame *k* is therefore
+placed at the call site recorded by frame *k-1* (`NameSpace.callerInfoNode`, which
+carries the source file too), and frame 0 at the statement being reported. Reading
+`getInvocationLine()` off each frame directly yields a stack that is off by one
+level and looks plausible.
+
+`evaluate` and `setVariable` are not in the protocol yet — see
+[`docs/FUTURE_WORK.md`](../docs/FUTURE_WORK.md).
 
 ---
 

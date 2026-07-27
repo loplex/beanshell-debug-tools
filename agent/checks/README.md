@@ -23,6 +23,7 @@ Each one needs something a JVM test cannot arrange from inside itself:
 | `04-behaviour-unchanged.sh` | the same fixtures run twice, in separate JVMs, one with the agent |
 | `05-two-script-threads.sh` | two real threads, suspended at the same time over one socket |
 | `06-suspend-all.sh` | a thread stopping at a line that has no breakpoint on it |
+| `07-dap-transport.sh` | a real DAP conversation, handshake included, over a socket |
 
 They are also the checks you want *while* changing the agent, one at a time, with the
 output in front of you — which is the other reason they are scripts.
@@ -61,6 +62,12 @@ own locals.
 **`06` — Suspend: All.** That a thread stops at a line carrying **no breakpoint**, which is the
 only observation that distinguishes the round-up from ordinary per-thread suspension. Gives each
 thread its own code so the breakpoint can belong to one of them alone.
+
+**`07` — the DAP transport.** That the same debugger works over DAP: the handshake in the right
+order (a client that never sees `initialized` configures nothing), breakpoints honoured, a stack
+with depth, both scopes, and an expression evaluated in the stopped frame. Between them those cover
+every translation `DapChannel` performs. `dap-client.py` beside it is a standalone DAP client for
+driving a session by hand, the way `mock-ide.py` is for the native protocol.
 
 **`04` — behaviour is unchanged.** The agent must not change what a script does. Allows
 exactly the three differences documented in [`../samples/README.md`](../samples/README.md)

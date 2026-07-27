@@ -149,6 +149,14 @@ different digits.
 
 ## 3. Protocol
 
+**Two transports.** `-Dbsh.debug.protocol=dap` speaks the [Debug Adapter Protocol][dap] and
+**listens** (`bsh.debug.listen`), for VS Code, Neovim and Eclipse; the default is the native
+protocol below, which **connects out** and is what the IntelliJ plugin speaks. `DebugChannel` is
+the seam — everything above it is written once, and only the encoding exists twice. Full rationale
+in [`docs/PROTOCOL.md`](../docs/PROTOCOL.md#9-relationship-to-dap).
+
+[dap]: https://microsoft.github.io/debug-adapter-protocol/specification
+
 Version 3. Both directions are opcode-tagged, everything is addressed to a thread, and
 a reply carries the id of the request it answers. **The full specification is
 [`docs/PROTOCOL.md`](../docs/PROTOCOL.md)** — framing, every field, the invariants and the

@@ -224,11 +224,15 @@ level — which is how the scopes and the `This`-as-namespace expansion above we
 diff plain.txt agent.txt      # only the differences listed in agent/samples/README.md
 ```
 
-**What this cannot tell you** is whether IntelliJ's Maven runner passes
-`MavenRunnerSettings.vmOptions` (where the `-javaagent` is injected) through to the JVM
-the plugin realm lives in. That one needs `runIde`. If it did not, the symptom is
-specific: with `AGENT` selected the launch fails with the agent-jar message, and with
-`AGENT_OR_REWRITE` the console says the script was rewritten instead.
+**Verified in the IDE**, since it is the one thing the scripts above cannot reach: IntelliJ's
+Maven runner does pass `MavenRunnerSettings.vmOptions` — where the `-javaagent` is injected —
+through to the JVM the plugin realm lives in. Debugging an inline `<script>` gives expandable
+values, which is the giveaway: only the instrumenting agent hands out child handles, so a
+rewritten session would show a flat list and no Evaluate.
+
+That is also the diagnostic if it ever regresses. Flat variables and a greyed-out Evaluate mean
+the agent did not load, and the console (under `AGENT_OR_REWRITE`) or the launch error (under
+`AGENT`) says why.
 
 ## Threads
 

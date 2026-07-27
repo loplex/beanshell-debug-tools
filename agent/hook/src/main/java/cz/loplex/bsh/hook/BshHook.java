@@ -76,6 +76,31 @@ public final class BshHook {
     public static final String SOURCE_PREFIXES_FILE_PROPERTY = "bsh.debug.sources.file";
 
     /**
+     * Which wire protocol to speak: {@code native} (the default) or {@code dap}.
+     *
+     * <p>{@code native} is the compact binary protocol the IntelliJ plugin speaks, specified in
+     * {@code docs/PROTOCOL.md}. {@code dap} is the Debug Adapter Protocol, for VS Code, Neovim,
+     * Eclipse and anything else that speaks it.
+     *
+     * <p>Two transports rather than one, because neither subsumes the other in practice: LSP4IJ's DAP
+     * client does not implement the {@code thread} event, so routing IntelliJ through DAP would lose
+     * the thread support the native path has. Keeping both means neither side pays for the other's
+     * limitations.
+     */
+    public static final String PROTOCOL_PROPERTY = "bsh.debug.protocol";
+
+    /**
+     * Port to <b>listen</b> on, for DAP. Defaults to {@link #PORT_PROPERTY} when unset.
+     *
+     * <p>The direction differs by protocol and it is not arbitrary. The native channel connects out,
+     * because the IDE launches the process and already has a port. A DAP client instead expects to
+     * <em>attach</em> to something running, so under DAP the agent listens and the script waits on its
+     * first statement until a client arrives — without which it would finish before anyone could set a
+     * breakpoint.
+     */
+    public static final String LISTEN_PORT_PROPERTY = "bsh.debug.listen";
+
+    /**
      * When set, report to stderr instead of the socket. A development aid for checking which
      * nodes qualify as statements without needing an IDE or a listener on the other end.
      */
@@ -228,7 +253,8 @@ public final class BshHook {
         final String name;
 
         /** Commands the reader thread has handed to this thread, in arrival order. */
-        final BlockingQueue<Object[]> mailbox = new LinkedBlockingQueue<Object[]>();
+        final BlockingQueue<DebugChannel.Command> mailbox =
+                new LinkedBlockingQueue<DebugChannel.Command>();
 
         /** Objects the IDE may expand, valid only for this thread's current stop. */
         final Map<Integer, Object> handles = new HashMap<Integer, Object>();
@@ -316,6 +342,14 @@ public final class BshHook {
      */
     private static volatile boolean catchAll;
 
+    /**
+     * How long the first statement waits for a DAP client to finish configuring.
+     *
+     * <p>Bounded so a client that attaches and then goes quiet cannot hang the host program. Timing out
+     * runs the script unfiltered, which is the same outcome as an IDE that never sends breakpoints.
+     */
+    private static final long CONFIGURATION_TIMEOUT_MS = 30_000L;
+
     private static final Object WRITE_LOCK = new Object();
 
     /** Guards {@link #connect} and the reader-thread start, which must happen exactly once. */
@@ -326,9 +360,14 @@ public final class BshHook {
     private static final String[] sourcePrefixes;
     private static final boolean trace;
     private static boolean disabled;
-    private static Socket socket;
-    private static DataOutputStream out;
-    private static DataInputStream in;
+    /**
+     * The wire. One of {@link NativeChannel} or {@link DapChannel}, chosen once at class init.
+     *
+     * <p>Everything above this field is transport-independent: the hook decides what to say, the
+     * channel decides how to encode it. That is what makes a second protocol a matter of one more
+     * implementation rather than a second debugger.
+     */
+    private static DebugChannel channel;
 
     // Reflection handles, resolved once. Every BSH* node inherits these from the
     // package-private bsh.SimpleNode, so a single Method works for all of them.
@@ -390,11 +429,35 @@ public final class BshHook {
 
         sourcePrefixes = readSourcePrefixes(System.getProperty(SOURCE_PREFIXES_FILE_PROPERTY));
 
+        boolean dap = "dap".equalsIgnoreCase(String.valueOf(System.getProperty(PROTOCOL_PROPERTY)));
+        int listenPort = parsedPort(LISTEN_PORT_PROPERTY, port);
+        if (dap && listenPort != -1) {
+            channel = new DapChannel(listenPort);
+        } else if (!dap && port != -1) {
+            channel = new NativeChannel(port);
+        } else {
+            channel = null;
+        }
+
         // Tracing to stderr needs no listener, so it is a valid mode on its own.
-        disabled = port == -1 && !trace;
+        disabled = channel == null && !trace;
     }
 
     private BshHook() {
+    }
+
+    /** A port property, or [fallback] when unset or unparseable. */
+    private static int parsedPort(String property, int fallback) {
+        String value = System.getProperty(property);
+        if (value == null || value.trim().isEmpty()) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException malformed) {
+            System.err.println("[bsh-agent] ignoring malformed " + property + "='" + value + "'");
+            return fallback;
+        }
     }
 
     /**
@@ -557,11 +620,31 @@ public final class BshHook {
             return false;
         }
         for (int i = 0; i < files.size(); i++) {
-            if (sourceFile.endsWith(files.get(i))) {
+            if (pathsMatch(sourceFile, files.get(i))) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Whether a reported source and a configured breakpoint path name the same file.
+     *
+     * <p>Matched as a suffix in <b>either</b> direction, because which of the two is the longer depends
+     * on the client. The IntelliJ plugin sends absolute paths and BeanShell reports whatever the script
+     * was launched with — so a script run as {@code bsh.Interpreter t.bsh} reports {@code t.bsh} while
+     * the breakpoint says {@code /home/…/t.bsh}. A DAP client always sends absolute paths, which made
+     * this the difference between breakpoints working and silently never firing.
+     *
+     * <p>Neither direction alone is enough and both together are still a heuristic: two files with the
+     * same name in different directories are indistinguishable. That is inherent to matching on a name
+     * the interpreter may have received relatively, not something a stricter rule here could fix.
+     */
+    private static boolean pathsMatch(String reported, String configured) {
+        if (configured.isEmpty()) {
+            return false;
+        }
+        return reported.endsWith(configured) || configured.endsWith(reported);
     }
 
     /**
@@ -572,7 +655,7 @@ public final class BshHook {
      * first.
      */
     private static void drainMailbox(ThreadState state) {
-        Object[] message;
+        DebugChannel.Command message;
         while ((message = state.mailbox.poll()) != null) {
             try {
                 applyCommand(state, message);
@@ -603,31 +686,42 @@ public final class BshHook {
     private static void readerLoop() {
         try {
             while (true) {
-                int command = in.readByte() & 0xFF;
-                if (command == CMD_SET_CATCH_ALL) {
-                    // Global, so it carries no thread id and is applied here rather than routed.
-                    catchAll = in.readByte() != 0;
-                    continue;
+                DebugChannel.Command command = channel.readCommand();
+                if (command == null || command.kind == DebugChannel.Command.Kind.DISCONNECT) {
+                    sessionLost(new IOException("client disconnected"));
+                    return;
                 }
-                if (command == CMD_SET_BREAKPOINTS) {
-                    // Breakpoints are the one piece of shared configuration, so they are applied
-                    // here rather than routed to a thread -- there may be no suspended thread to
-                    // route them to, which is exactly when the IDE sends them.
-                    readBreakpoints();
-                    continue;
+                switch (command.kind) {
+                    case HANDLED:
+                        // The transport answered it itself (a DAP handshake message).
+                        continue;
+                    case SET_BREAKPOINTS:
+                        // The one piece of shared configuration, so it is applied here rather than
+                        // routed to a thread -- there may be no suspended thread to route it to,
+                        // which is exactly when a client sends it.
+                        applyBreakpoints(command);
+                        continue;
+                    case SET_CATCH_ALL:
+                        catchAll = command.mode != 0;
+                        continue;
+                    default:
+                        break;
                 }
-                Object[] message = readMessage(command);
-                if (message == null) {
-                    continue;
-                }
-                int threadId = ((Integer) message[1]).intValue();
-                ThreadState target = threadsById.get(Integer.valueOf(threadId));
+                ThreadState target = threadsById.get(Integer.valueOf(command.threadId));
                 if (target == null) {
-                    // A command for a thread that has exited. Dropping it is right: the IDE will
-                    // have been told the thread is gone, and there is nobody to answer for it.
+                    // A command for a thread that has exited. Dropping it is right: there is nobody
+                    // to answer for it, and the client will have been told the thread is gone.
                     continue;
                 }
-                target.mailbox.offer(message);
+                target.mailbox.offer(command);
+                // DAP folds "how to step" and "go" into one request, so a step arrives as a mode with
+                // an implied resume. Asking the channel for it here keeps that quirk out of the hook.
+                if (channel instanceof DapChannel) {
+                    DebugChannel.Command follow = ((DapChannel) channel).takePendingResume();
+                    if (follow != null) {
+                        target.mailbox.offer(follow);
+                    }
+                }
             }
         } catch (IOException ex) {
             sessionLost(ex);
@@ -639,76 +733,57 @@ public final class BshHook {
     }
 
     /**
-     * Reads one command's payload off the wire into {@code [opcode, threadId, args…]}.
-     *
-     * <p>The reader has to know every opcode's shape even though it interprets none of them: without
-     * length prefixes there is no way to skip a message, so an opcode it could not decode would
-     * desynchronise the stream for good. An unknown opcode therefore reads its thread id and stops
-     * there, which keeps the stream aligned for anything that carries no further fields.
-     */
-    private static Object[] readMessage(int command) throws IOException {
-        int threadId = in.readInt();
-        switch (command) {
-            case CMD_RESUME:
-                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId) };
-            case CMD_SET_RUN_MODE:
-                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId),
-                        Integer.valueOf(in.readByte() & 0xFF) };
-            case CMD_SCOPES:
-            case CMD_VARIABLES:
-                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId),
-                        Integer.valueOf(in.readInt()), Integer.valueOf(in.readInt()) };
-            case CMD_EVALUATE:
-                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId),
-                        Integer.valueOf(in.readInt()), Integer.valueOf(in.readInt()), in.readUTF() };
-            case CMD_SET_VARIABLE:
-                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId),
-                        Integer.valueOf(in.readInt()), Integer.valueOf(in.readInt()),
-                        Integer.valueOf(in.readInt()), in.readUTF(), in.readUTF() };
-            default:
-                System.err.println("[bsh-agent] ignoring unknown command 0x"
-                        + Integer.toHexString(command));
-                return null;
-        }
-    }
-
-    /**
      * Applies one command on the thread that owns the state, and answers it if it expects an answer.
      *
-     * <p>Returns true when the command was {@code RESUME}, i.e. when the caller should stop waiting.
-     * An unrecognised command counts as a release: the worst case is a script that keeps running,
-     * whereas ignoring it could leave a thread parked for good.
+     * <p>Returns true when the thread should stop waiting. An unrecognised command counts as a
+     * release: the worst case is a script that keeps running, whereas ignoring it could leave a thread
+     * parked for good.
      */
-    private static boolean applyCommand(ThreadState state, Object[] message) throws IOException {
-        int command = ((Integer) message[0]).intValue();
-        switch (command) {
-            case CMD_SET_RUN_MODE:
-                state.runMode = ((Integer) message[2]).intValue();
+    private static boolean applyCommand(ThreadState state, DebugChannel.Command command)
+            throws IOException {
+        switch (command.kind) {
+            case SET_RUN_MODE:
+                state.runMode = command.mode;
                 return false;
-            case CMD_SCOPES:
-                writeScopes(state, ((Integer) message[2]).intValue(), ((Integer) message[3]).intValue());
+            case SCOPES:
+                channel.sendScopes(command.requestId, collectScopes(state, command.frameId));
                 return false;
-            case CMD_VARIABLES:
-                writeVariables(state, ((Integer) message[2]).intValue(), ((Integer) message[3]).intValue());
+            case VARIABLES:
+                channel.sendVariables(command.requestId, collectVariables(state, command.handle));
                 return false;
-            case CMD_EVALUATE:
-                writeEvaluated(EVT_EVALUATED, ((Integer) message[2]).intValue(),
-                        evaluate(state, ((Integer) message[3]).intValue(), (String) message[4]));
+            case EVALUATE: {
+                Outcome outcome = evaluate(state, command.frameId, command.expression);
+                sendOutcome(command.requestId, false, outcome);
                 return false;
-            case CMD_SET_VARIABLE:
-                writeEvaluated(EVT_VARIABLE_SET, ((Integer) message[2]).intValue(),
-                        assign(state, ((Integer) message[3]).intValue(), ((Integer) message[4]).intValue(),
-                                (String) message[5], (String) message[6]));
+            }
+            case SET_VARIABLE: {
+                Outcome outcome = assign(state, command.frameId, command.handle, command.name,
+                        command.expression);
+                sendOutcome(command.requestId, true, outcome);
                 return false;
+            }
             default:
                 return true;
         }
     }
 
+    /** Writes an {@link Outcome} as the reply to whichever request produced it. */
+    private static void sendOutcome(int requestId, boolean setVariable, Outcome outcome)
+            throws IOException {
+        channel.sendEvaluated(
+                requestId,
+                setVariable,
+                outcome.ok,
+                truncate(outcome.text),
+                outcome.ok ? typeName(outcome.value) : "",
+                outcome.ok && expandable(outcome.value) ? handleFor(outcome.state, outcome.value)
+                        : NO_HANDLE);
+    }
+
     /** Blocks on this thread's mailbox until the IDE releases it, applying anything sent first. */
     private static void awaitResume(ThreadState state) throws IOException {
         while (true) {
-            Object[] message;
+            DebugChannel.Command message;
             try {
                 message = state.mailbox.take();
             } catch (InterruptedException ex) {
@@ -738,23 +813,22 @@ public final class BshHook {
         // gone. An empty message array is read as "unrecognised", which applyCommand treats as a
         // release.
         for (ThreadState waiting : threadsById.values()) {
-            waiting.mailbox.offer(new Object[] { Integer.valueOf(CMD_RESUME), Integer.valueOf(waiting.id) });
+            waiting.mailbox.offer(DebugChannel.Command.simple(
+                    DebugChannel.Command.Kind.RESUME, waiting.id));
         }
     }
 
-    private static void readBreakpoints() throws IOException {
-        int count = in.readInt();
+    /** Replaces the breakpoint set with the one the client just sent. */
+    private static void applyBreakpoints(DebugChannel.Command command) {
         Map<Integer, List<String>> parsed = new HashMap<Integer, List<String>>();
-        for (int i = 0; i < count; i++) {
-            String file = in.readUTF();
-            int line = in.readInt();
-            Integer key = Integer.valueOf(line);
+        for (int i = 0; i < command.breakpointLines.length; i++) {
+            Integer key = Integer.valueOf(command.breakpointLines[i]);
             List<String> files = parsed.get(key);
             if (files == null) {
                 files = new ArrayList<String>(2);
                 parsed.put(key, files);
             }
-            files.add(file);
+            files.add(command.breakpointFiles[i]);
         }
         // Published as a whole so a concurrent shouldReport() never sees a half-built map.
         breakpointsByLine = parsed;
@@ -857,27 +931,19 @@ public final class BshHook {
         state.frames = frames;
         state.interpreter = interpreter;
         try {
-            // Held only for the write. A stop no longer holds any lock -- which is what lets a second
-            // thread report while this one is still parked below.
-            synchronized (WRITE_LOCK) {
-                out.writeByte(EVT_STOPPED);
-                out.writeInt(state.id);
-                out.writeUTF(state.name);
-                out.writeInt(line);
-                out.writeInt(depth);
-                out.writeInt(frames.length);
-                for (int i = 0; i < frames.length; i++) {
-                    out.writeUTF(frameName(frames[i]));
-                    // Frame 0 sits at the statement being reported; every outer frame sits at the
-                    // call site recorded by the frame below it. Reading getInvocationLine() off the
-                    // frame itself would be off by one level -- it answers "where was I called
-                    // from", which is a position in the *next* frame out.
-                    Object site = i == 0 ? null : callerInfoNode(frames[i - 1]);
-                    out.writeUTF(i == 0 ? nullToEmpty(sourceFile) : nullToEmpty(nodeSourceFile(site)));
-                    out.writeInt(i == 0 ? line : nodeLine(site));
-                }
-                out.flush();
+            List<DebugChannel.Frame> reported = new ArrayList<DebugChannel.Frame>(frames.length);
+            for (int i = 0; i < frames.length; i++) {
+                // Frame 0 sits at the statement being reported; every outer frame sits at the call
+                // site recorded by the frame below it. Reading getInvocationLine() off the frame
+                // itself would be off by one level -- it answers "where was I called from", which is
+                // a position in the *next* frame out.
+                Object site = i == 0 ? null : callerInfoNode(frames[i - 1]);
+                reported.add(new DebugChannel.Frame(
+                        frameName(frames[i]),
+                        i == 0 ? nullToEmpty(sourceFile) : nullToEmpty(nodeSourceFile(site)),
+                        i == 0 ? line : nodeLine(site)));
             }
+            channel.sendStopped(state.id, state.name, line, depth, reported);
             awaitResume(state);
         } catch (IOException ex) {
             sessionLost(ex);
@@ -896,20 +962,20 @@ public final class BshHook {
      * breakpoint is the failure that looks like "it just ran".
      */
     private static boolean ensureConnected() {
-        if (socket != null) {
-            return true;
+        if (channel != null && channel.isConnected()) {
+            return waitForConfiguration();
         }
         synchronized (CONNECT_LOCK) {
-            if (disabled) {
+            if (disabled || channel == null) {
                 return false;
             }
-            if (socket != null) {
-                return true;
+            if (channel.isConnected()) {
+                return waitForConfiguration();
             }
             try {
-                connect();
+                channel.connect();
             } catch (IOException ex) {
-                System.err.println("[bsh-agent] cannot reach the IDE debug server on 127.0.0.1:"
+                System.err.println("[bsh-agent] cannot establish the debug connection on port "
                         + port + " (" + ex + "); aborting");
                 System.exit(EXIT_DEBUG_UNAVAILABLE);
             }
@@ -920,8 +986,42 @@ public final class BshHook {
             }, "bsh-agent-reader");
             reader.setDaemon(true);
             reader.start();
+        }
+        return waitForConfiguration();
+    }
+
+    /**
+     * Under DAP, blocks until the client has finished configuring.
+     *
+     * <p>DAP has a handshake the native protocol does not: a client sends {@code initialize}, waits for
+     * {@code initialized}, sends its breakpoints, then {@code configurationDone}. Reporting before that
+     * last step means reporting before the breakpoints exist — for a short script, the whole run could
+     * be over first. So the first statement waits.
+     *
+     * <p>Bounded, because a client that attaches and then never configures must not hang the host
+     * program. Timing out means the script runs on unfiltered, which is the same outcome as an IDE that
+     * never sends a breakpoint set.
+     */
+    private static boolean waitForConfiguration() {
+        if (!(channel instanceof DapChannel)) {
             return true;
         }
+        DapChannel dap = (DapChannel) channel;
+        long deadline = System.currentTimeMillis() + CONFIGURATION_TIMEOUT_MS;
+        while (!dap.isConfigured() && !disabled) {
+            if (System.currentTimeMillis() > deadline) {
+                System.err.println("[bsh-agent] DAP: client did not finish configuring within "
+                        + CONFIGURATION_TIMEOUT_MS + "ms; running on");
+                return true;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return true;
+            }
+        }
+        return !disabled;
     }
 
     /**
@@ -1014,38 +1114,27 @@ public final class BshHook {
      * are the same object) and when there is no interpreter to ask — the rewriting path, which is
      * handed a namespace only.
      */
-    private static void writeScopes(ThreadState state, int requestId, int frameId) throws IOException {
+    private static List<DebugChannel.Scope> collectScopes(ThreadState state, int frameId) {
         Object namespace = frame(state, frameId);
         Object global = globalNameSpace(state);
         boolean hasGlobal = global != null && global != namespace;
-        synchronized (WRITE_LOCK) {
-            out.writeByte(EVT_SCOPES);
-            out.writeInt(requestId);
-            if (namespace == null) {
-                out.writeInt(hasGlobal ? 1 : 0);
-            } else {
-                out.writeInt(hasGlobal ? 2 : 1);
-                out.writeUTF("Locals");
-                out.writeInt(handleFor(state, namespace));
-            }
-            if (hasGlobal) {
-                out.writeUTF("Global");
-                out.writeInt(handleFor(state, global));
-            }
-            out.flush();
+        List<DebugChannel.Scope> scopes = new ArrayList<DebugChannel.Scope>(2);
+        if (namespace != null) {
+            scopes.add(new DebugChannel.Scope("Locals", handleFor(state, namespace)));
         }
+        if (hasGlobal) {
+            scopes.add(new DebugChannel.Scope("Global", handleFor(state, global)));
+        }
+        return scopes;
     }
 
     /**
-     * Answers {@link #CMD_VARIABLES}: the children of one handle, each with a handle of its own
-     * when it can be expanded further.
+     * The children of one handle, each with a handle of its own when it can be expanded further.
      */
-    private static void writeVariables(ThreadState state, int requestId, int handle) throws IOException {
-        List<String[]> children;
-        List<Object> values;
+    private static List<DebugChannel.Variable> collectVariables(ThreadState state, int handle) {
         Object target = state.handles.get(Integer.valueOf(handle));
-        children = new ArrayList<String[]>();
-        values = new ArrayList<Object>();
+        List<String[]> children = new ArrayList<String[]>();
+        List<Object> values = new ArrayList<Object>();
         try {
             if (isNameSpace(target)) {
                 collectNamespace(target, children, values);
@@ -1066,19 +1155,13 @@ public final class BshHook {
         } catch (Throwable ignored) {
             // Send whatever was gathered; an unreadable object is not worth failing the session.
         }
-        synchronized (WRITE_LOCK) {
-            out.writeByte(EVT_VARIABLES);
-            out.writeInt(requestId);
-            out.writeInt(children.size());
-            for (int i = 0; i < children.size(); i++) {
-                String[] entry = children.get(i);
-                out.writeUTF(entry[0]);
-                out.writeUTF(entry[1]);
-                out.writeUTF(entry[2]);
-                out.writeInt(expandable(values.get(i)) ? handleFor(state, values.get(i)) : NO_HANDLE);
-            }
-            out.flush();
+        List<DebugChannel.Variable> variables = new ArrayList<DebugChannel.Variable>(children.size());
+        for (int i = 0; i < children.size(); i++) {
+            String[] entry = children.get(i);
+            variables.add(new DebugChannel.Variable(entry[0], entry[1], entry[2],
+                    expandable(values.get(i)) ? handleFor(state, values.get(i)) : NO_HANDLE));
         }
+        return variables;
     }
 
     /** The namespace of one frame of this thread's current stop, or null when there is no such frame. */
@@ -1111,20 +1194,6 @@ public final class BshHook {
 
         static Outcome failed(String reason) {
             return new Outcome(false, reason, null, null);
-        }
-    }
-
-    /** Writes an {@link Outcome} as the reply to whichever request produced it. */
-    private static void writeEvaluated(int event, int requestId, Outcome outcome) throws IOException {
-        synchronized (WRITE_LOCK) {
-            out.writeByte(event);
-            out.writeInt(requestId);
-            out.writeBoolean(outcome.ok);
-            out.writeUTF(truncate(outcome.text));
-            out.writeUTF(outcome.ok ? typeName(outcome.value) : "");
-            out.writeInt(outcome.ok && expandable(outcome.value)
-                    ? handleFor(outcome.state, outcome.value) : NO_HANDLE);
-            out.flush();
         }
     }
 
@@ -1618,26 +1687,15 @@ public final class BshHook {
         return method;
     }
 
-    private static void connect() throws IOException {
-        socket = new Socket("127.0.0.1", port);
-        out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
-        in = new DataInputStream(socket.getInputStream());
-    }
+
 
     private static String truncate(String value) {
         return value.length() <= MAX_VALUE_LENGTH ? value : value.substring(0, MAX_VALUE_LENGTH) + "…";
     }
 
     private static void close() {
-        try {
-            if (socket != null) {
-                socket.close();
-            }
-        } catch (IOException ignored) {
-            // nothing useful to do
+        if (channel != null) {
+            channel.close();
         }
-        socket = null;
-        out = null;
-        in = null;
     }
 }

@@ -1,6 +1,10 @@
 # The BeanShell debug wire protocol
 
-Version **3**. The reference specification: everything an implementation of either end
+Version **3** of the native protocol. **DAP is also available** as a second transport —
+`-Dbsh.debug.protocol=dap` — see [§9](#9-relationship-to-dap). This document specifies the
+native one, which is what the IntelliJ plugin speaks and remains the default.
+
+The reference specification: everything an implementation of either end
 needs, and the reasoning behind the parts that are not obvious.
 
 Two implementations of the agent end live in this repository — the instrumenting JVM
@@ -346,15 +350,51 @@ no file name — see [`agent/README.md`](../agent/README.md#which-sources-to-rep
 
 ## 9. Relationship to DAP
 
-This protocol deliberately uses [DAP][dap]'s **vocabulary and model** under different
-names: `STOPPED` is the `stopped` event with the stack inline, `SCOPES`/`VARIABLES` are
-`scopes`/`variables` with `variablesReference` renamed to "handle", and `EVALUATE` /
-`SET_VARIABLE` are `evaluate` / `setVariable`. Lazy expansion by opaque reference is
-DAP's design, not a coincidence.
+Two transports, chosen at premain by `bsh.debug.protocol`:
 
-That is what would make adopting DAP a change of **serialisation** rather than of
-design. The costs and the current blockers are in
-[`FUTURE_WORK.md`](FUTURE_WORK.md#dap-as-the-transport).
+| value | transport | direction | who uses it |
+|---|---|---|---|
+| `native` (default) | this document | agent **connects** to the IDE's port (`bsh.debug.port`) | the IntelliJ plugin |
+| `dap` | [Debug Adapter Protocol][dap] | agent **listens** (`bsh.debug.listen`, defaults to `bsh.debug.port`) | VS Code, Neovim, Eclipse, … |
+
+**Why both, rather than DAP replacing this.** LSP4IJ's DAP client does not implement the
+`thread` event, so routing IntelliJ through DAP would *lose* the thread support the native
+path has. Keeping both is the arrangement where neither side pays for the other's
+limitations — and the cost is small, because only the last step of the hook turns an answer
+into bytes.
+
+The directions differ for a reason rather than by accident. The native channel connects out
+because the IDE launches the process and already chose a port. A DAP client instead expects
+to **attach** to something running, so under DAP the agent listens — and the script blocks on
+its first statement until the client has sent `configurationDone`, without which a short
+script would finish before a breakpoint could be set.
+
+**What the split looks like in code.** `DebugChannel` is the interface; `NativeChannel` and
+`DapChannel` implement it. Everything above it — deciding what counts as a statement, walking
+the call stack, rendering values, handing out handles, evaluating in a frame's namespace — is
+written once. That was possible because this protocol was built in DAP's vocabulary to begin
+with: `STOPPED`/`SCOPES`/`VARIABLES` are `stopped`/`scopes`/`variables`, and a handle *is* a
+`variablesReference`.
+
+**Three things DAP needs that this protocol does not**, all handled inside `DapChannel`:
+
+- **Globally unique frame ids.** The hook numbers frames per thread; DAP's `stackTrace` hands
+  out ids that `scopes` later quotes without naming a thread. Encoded as
+  `threadId * 1000 + frameIndex`.
+- **Stepping as a request.** DAP's `next`/`stepIn`/`stepOut` mean "set the mode *and* go",
+  where the native protocol keeps the two apart. One DAP request becomes two commands.
+- **A handshake.** `initialize` → `initialized` → `setBreakpoints` → `configurationDone`,
+  which this protocol deliberately has none of.
+
+**What the DAP side does not implement**, and says so in its capabilities rather than claiming
+it: conditional breakpoints, function breakpoints, exception breakpoints, step-back,
+restart-frame, and `pause`. The last is not an omission but the same limit as
+[invariant 2](#5-the-invariants) — a thread can only be stopped where it calls the hook, so
+there is nothing to interrupt. It answers `pause` with that reason instead of accepting and
+doing nothing.
+
+Exercised by `agent/checks/07-dap-transport.sh`, with `agent/checks/dap-client.py` as a
+standalone client for driving a session by hand.
 
 ## 10. Version history
 
@@ -368,9 +408,9 @@ design. The costs and the current blockers are in
 expect a reply. Threads are suspended and resumed independently, each with its own frames,
 handle table and run mode. Current.
 
-**4** (nothing reserved yet) — the likely contents are a capabilities handshake and a
-`threadExited` event. Today the IDE learns of a thread from its first `STOPPED` and never hears
-that it finished, which costs nothing in practice: a finished thread simply never stops again,
-and a request naming it is a no-op.
+**4** (nothing reserved yet) — the likely contents are a `threadExited` event and a reason on
+`STOPPED` (breakpoint / step / round-up), which the DAP channel currently reports generically.
+A capabilities handshake is no longer among them: DAP has one, and the native protocol still has
+both ends shipping together.
 
 [dap]: https://microsoft.github.io/debug-adapter-protocol/specification

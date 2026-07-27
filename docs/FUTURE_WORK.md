@@ -62,46 +62,32 @@ Where the same reasoning argues for *more*: anywhere the UI can show what BeanSh
 knows and Java reflection does not — a closure's captured namespace, the interpreter's
 own `global` namespace, a `This` returned to Java by a script.
 
-## DAP as the transport
+## DAP as a second transport — done
 
-Worth doing if VS Code support becomes valuable, or if maintaining an IntelliJ
-plugin stops being. Note what it costs on the IntelliJ side: there is **no native
-DAP** ([IJPL-83441] is open), and [LSP4IJ] supplies a general DAP client that lacks
-`Pause`, `ExceptionInfo`, `SetFunctionBreakpoints` and the `Thread` event — that
-last gap being exactly the threads item above.
+Available as `-Dbsh.debug.protocol=dap`. The native protocol remains the default and IntelliJ
+is unaffected, which was the whole point: LSP4IJ's DAP client does not implement the `thread`
+event, so routing IntelliJ through DAP would have lost the thread support the native path has.
 
-Having adopted the vocabulary first — protocol 3 is `stackTrace`/`scopes`/
-`variables`/`evaluate`/`setVariable` with lazy handles, under different names — is
-what makes this a transport swap rather than a redesign. A DAP-speaking agent is a
-debug adapter any DAP client can attach to, which is why the agent stays an
-independently publishable subproject rather than a source set of the plugin.
+It came out cheap for the reason predicted here — only the last step of the hook turns an
+answer into bytes, so `DebugChannel` splits the transport off and everything above it is
+written once. Adopting DAP's vocabulary first (`stackTrace`/`scopes`/`variables`/`evaluate`/
+`setVariable`, handles as `variablesReference`) is what made it a serialisation change rather
+than a redesign.
 
-### Two transports rather than a swap
+Three translations live in `DapChannel` and are worth knowing about: frame ids have to be made
+globally unique (DAP quotes them back without naming a thread), a DAP step is one request where
+the native protocol has two commands, and DAP has a handshake this protocol deliberately lacks.
+Specified in [`PROTOCOL.md`](PROTOCOL.md#9-relationship-to-dap), exercised by
+`agent/checks/07-dap-transport.sh`.
 
-The better shape is probably **both**: the native protocol for IntelliJ, DAP for
-everyone else, chosen by a system property at premain alongside `bsh.debug.port`.
+Not implemented, and declared as such in the capabilities rather than claimed: conditional,
+function and exception breakpoints, step-back, restart-frame, and `pause` — that last one being
+the same structural limit as everywhere else, since a thread can only stop where it calls the
+hook.
 
-It is cheap because the split falls in the right place already. Everything expensive
-in the hook — deciding what is a statement, walking the call stack, rendering values,
-handing out handles, evaluating in a frame's namespace — produces *answers*, and only
-the last step turns an answer into bytes. Today that step is `DataOutputStream`
-writes; DAP would make it JSON over `Content-Length` framing. So the work is one
-serialisation layer behind an interface, not two debuggers.
-
-Two things genuinely differ and are worth knowing before starting:
-
-- **DAP is request/response with ids, this protocol is strictly alternating.** The
-  native side leans on "a reply is always next on the wire" to avoid request ids (see
-  [`PROTOCOL.md`](PROTOCOL.md#5-the-invariants)). A DAP layer needs the ids anyway, so
-  doing threads first — which also needs them — pays for both.
-- **DAP clients expect capabilities negotiation** (an `initialize` handshake), which
-  this protocol deliberately has none of. That is additive: the native transport keeps
-  answering "there is nothing to negotiate", the DAP one answers honestly about what
-  it does not implement.
-
-The reason to want it is unchanged: it is what makes the agent usable from VS Code,
-Neovim or Eclipse. The reason not to start with it is that it buys IntelliJ nothing —
-see the LSP4IJ gaps above.
+**What is left on the DAP side** is packaging rather than protocol: a VS Code extension (a
+`launch.json` contribution and a `.bsh` language id) so attaching does not mean hand-writing a
+configuration. Nothing in the agent blocks it.
 
 [IJPL-83441]: https://youtrack.jetbrains.com/issue/IJPL-83441/Debug-adapter-protocol-support
 [LSP4IJ]: https://github.com/redhat-developer/lsp4ij

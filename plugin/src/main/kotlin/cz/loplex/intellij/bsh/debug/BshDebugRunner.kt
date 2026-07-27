@@ -121,6 +121,8 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
                         // Identity line mapping for a standalone .bsh, so the agent can be
                         // given the breakpoint set and filter locally.
                         pushFilterToAgent = useAgent,
+                        // Only the instrumenting agent holds an Interpreter to evaluate with.
+                        supportsEvaluation = useAgent,
                     )
             },
         )

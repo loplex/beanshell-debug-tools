@@ -135,10 +135,26 @@ public final class BshDebugAgent {
      */
     private static final int CMD_SCOPES = 0x04;
     private static final int CMD_VARIABLES = 0x05;
+    private static final int CMD_EVALUATE = 0x06;
+    private static final int CMD_SET_VARIABLE = 0x07;
     private static final int EVT_STOPPED = 0x10;
     private static final int EVT_SCOPES = 0x11;
     private static final int EVT_VARIABLES = 0x12;
+    private static final int EVT_EVALUATED = 0x13;
+    private static final int EVT_VARIABLE_SET = 0x14;
     private static final int NO_HANDLE = 0;
+
+    /**
+     * Why this path answers no to both evaluating requests.
+     *
+     * <p>Running an expression needs a {@code bsh.Interpreter}, and a rewritten script hands the hook
+     * a {@code bsh.NameSpace} — which cannot evaluate anything. The IDE is told as much up front and
+     * offers neither Watches nor Set Value here, so this reply is the belt to that braces: an
+     * unrecognised opcode is treated as a resume, and silently continuing a script because the IDE
+     * asked a question this path cannot answer would be much worse than an error message.
+     */
+    private static final String NOT_SUPPORTED =
+            "Evaluation needs the instrumenting agent; this session rewrites the script instead";
 
     /** The one handle this path issues: the frame's namespace. Variables are flat, so no more. */
     private static final int NAMESPACE_HANDLE = 1;
@@ -169,11 +185,31 @@ public final class BshDebugAgent {
                     out.writeInt(NO_HANDLE);
                 }
                 out.flush();
+            } else if (command == CMD_EVALUATE) {
+                in.readInt();  // frame id
+                in.readUTF();  // expression
+                refuse(EVT_EVALUATED);
+            } else if (command == CMD_SET_VARIABLE) {
+                in.readInt();  // frame id
+                in.readInt();  // container handle
+                in.readUTF();  // name
+                in.readUTF();  // expression
+                refuse(EVT_VARIABLE_SET);
             } else {
                 // CMD_RESUME, and anything unrecognised, which must not be able to wedge a script.
                 return;
             }
         }
+    }
+
+    /** Answers a request this path cannot serve, keeping the script suspended. */
+    private static void refuse(int event) throws IOException {
+        out.writeByte(event);
+        out.writeBoolean(false);
+        out.writeUTF(NOT_SUPPORTED);
+        out.writeUTF("");
+        out.writeInt(NO_HANDLE);
+        out.flush();
     }
 
     /** Number of active BeanShell user-method frames — grows by a fixed amount per nested call. */

@@ -15,7 +15,7 @@ plain terminal.
 |------|------|
 | `bshInstrumenter.main.kts` | Reads a `.bsh` script on **stdin**, writes an instrumented copy to **stdout**. Before every safe statement it prepends `cz.loplex.intellij.bsh.debug.agent.BshDebugAgent.step(line, this.namespace);`. |
 | `run-debug-bsh.sh` | Instruments a script (via the above) and runs it through `bsh.Interpreter`, with `BshDebugAgent` on the classpath from `build/`. Given a port, tells the agent to connect there. |
-| `mock-ide.py` | Stands in for the IDE end of the transport. Listens on a port, prints every step frame (`line`, `callDepth`, variables), and replies "resume" so the script runs to completion. With `--breakpoints file.bsh:25,…` it also pushes a breakpoint set, which makes the agent filter locally instead of reporting every statement. |
+| `mock-ide.py` | Stands in for the IDE end of the transport. Listens on a port, prints every stop (`line`, `callDepth`, the call stack) with frame 0's variables, and replies "resume" so the script runs to completion. Options exercise the rest of the protocol: `--breakpoints file.bsh:25,…` pushes a breakpoint set, which makes the agent filter locally instead of reporting every statement; `--expand` opens every expandable value one level; `--eval 'x + 1,twice(x)'` evaluates in frame 0; `--set count=99` assigns there. |
 | `check-instrumentation.py` | Checks an implementation against the `HOOK` / `NO-HOOK` / `REWRITE-ONLY` / `AGENT-ONLY` markers in `samples/instrumentation-boundaries.bsh`, so those markers cannot rot. `--target rewriter` (static, checks every marked line) or `--target agent` (dynamic, checks the lines a run actually reaches). |
 
 ## Running them together

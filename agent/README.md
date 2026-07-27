@@ -158,6 +158,8 @@ agent -> IDE
   0x11 SCOPES     int count, (utf name, int handle)*        answers 0x04
   0x12 VARIABLES  int count,
                   (utf name, utf value, utf type, int childHandle)*   answers 0x05
+  0x13 EVALUATED     byte ok, utf value, utf type, int childHandle    answers 0x06
+  0x14 VARIABLE_SET  byte ok, utf value, utf type, int childHandle    answers 0x07
 
 IDE -> agent
   0x01 RESUME
@@ -165,6 +167,9 @@ IDE -> agent
   0x03 SET_RUN_MODE     byte mode                           0 = running
   0x04 SCOPES           int frameId                         only while suspended
   0x05 VARIABLES        int handle                          only while suspended
+  0x06 EVALUATE         int frameId, utf expression         only while suspended
+  0x07 SET_VARIABLE     int frameId, int handle,
+                        utf name, utf expression            only while suspended
 ```
 
 **Variables are pulled, not pushed.** Each expandable value carries an opaque
@@ -199,8 +204,39 @@ carries the source file too), and frame 0 at the statement being reported. Readi
 `getInvocationLine()` off each frame directly yields a stack that is off by one
 level and looks plausible.
 
-`evaluate` and `setVariable` are not in the protocol yet — see
-[`docs/FUTURE_WORK.md`](../docs/FUTURE_WORK.md).
+### Evaluating, and changing a value
+
+`EVALUATE` hands the expression to `Interpreter.eval(String, NameSpace)` with the
+frame's own namespace, so a watch sees exactly what the script sees there — its
+variables, its methods, its imports — rather than a reimplementation of BeanShell's
+name resolution. Two properties of that call shape the design:
+
+- **It returns plain Java.** `1+1` comes back as `java.lang.Integer`, `null` as a
+  real `null` — unlike a namespace lookup, which hands back the `bsh.Primitive`
+  that wraps every scripted number. So an evaluated result needs no unwrapping
+  before it is rendered or stored, and reflective `field.set`/`Array.set` accept it
+  directly.
+- **It runs the real assignment path.** `SET_VARIABLE` on a variable in scope is
+  served by evaluating `name = (expression)` rather than by calling
+  `NameSpace.setVariable`, which means BeanShell applies its own rules: a typed
+  variable refuses an incompatible value (`Can't assign java.lang.String to int`)
+  exactly as the script would, and a variable inherited from an enclosing scope is
+  updated where it was declared instead of being shadowed. Anything that is not a
+  namespace — a field, an array element, a list slot, a map entry — has no
+  expression that names it and is reached reflectively instead.
+
+A failure is an ordinary reply with `ok = 0`, not a dropped connection: a mistyped
+watch expression is normal use. BeanShell's messages lead with the source and an
+echo of the expression, so only the tail of the first line is sent on.
+
+The re-entrancy guard is what makes any of this safe — an evaluated expression may
+call a script method, and that method's statements are instrumented too. The guard
+is held for the whole of a stop, so everything served while suspended is covered.
+
+Neither request is available on the plugin's *source-rewriting* fallback: a
+rewritten script hands the hook a `NameSpace`, and a namespace cannot evaluate. It
+answers `ok = 0` with that reason rather than letting an opcode it does not serve
+fall through to "resume", which would silently continue the script.
 
 ---
 

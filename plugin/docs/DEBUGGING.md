@@ -124,13 +124,39 @@ handed a single `NameSpace`, which does not know its caller, so it reports one
 frame and offers no nested expansion — it reads values out of the namespace as
 strings and never holds the objects.
 
+## Evaluating, and Set Value
+
+`BshStackFrame.getEvaluator()` backs Watches and the Evaluate dialog;
+`BshValue.getModifier()` backs Set Value. Both send the expression to the agent,
+which runs it through the real interpreter in the selected frame — so `count + 1`
+and `twice(count)` mean there what they mean in the script. The agent side is
+described in [`agent/README.md`](../../agent/README.md).
+
+Three things the IDE side is responsible for:
+
+- **Neither is offered where it cannot work.** `BshValueSource.supportsEvaluation`
+  is false on the rewriting path, so no evaluator and no modifier are handed to the
+  platform — better than offering them and failing. `getModifier()` also returns
+  null for a value with no container, such as an expression's own result.
+- **Requests run off the UI thread.** The platform calls the evaluator from the UI
+  thread for the Evaluate dialog, and the exchange with the agent blocks, so both go
+  through `executeOnPooledThread`; the callbacks are designed to be invoked later.
+- **An unanswered request retires the channel.** Replies are matched by arrival
+  order and carry no request id, which is only sound while every request is
+  answered. After a timeout the agent may still be working, and its late reply would
+  otherwise be handed to the next request as its own answer — so `BshDebugProcess`
+  marks the channel desynced instead. Correlating replies is the general fix and it
+  belongs with threads, which need it anyway.
+
+Evaluation has its own, much longer timeout: a watch expression is arbitrary user
+code, so a few seconds is a plausible answer rather than a failure.
+
 ## Limitations
 
-- No expression evaluation against the live namespace, and no editing a value in
-  place. The hook holds the `Interpreter`, so `interpreter.eval(expr, namespace)`
-  works — the protocol just has no opcode for it yet.
 - The protocol carries no thread id and the hook holds a global lock while
   suspended, so two script threads cannot be told apart or suspended
   independently.
+- A scripted class instance shows BeanShell's own `_bshThis…` back-reference among
+  its fields, because it is a real field rather than a synthetic one.
 
 Both are tracked in [`docs/FUTURE_WORK.md`](../../docs/FUTURE_WORK.md).

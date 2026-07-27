@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * How long a variables request waits before giving up.
+ * How long a scopes or variables request waits before giving up.
  *
  * Only reachable if the agent died between the stop and the expansion, since it answers from the
  * loop it is already parked in. Bounded anyway: the platform calls `computeChildren` off the UI
@@ -31,16 +31,26 @@ import java.util.concurrent.TimeUnit
 private const val REQUEST_TIMEOUT_MS = 5_000L
 
 /**
+ * How long an evaluation waits, which cannot be the same bound.
+ *
+ * A watch expression is arbitrary user code — it may call a script method that does real work — so a
+ * few seconds is a plausible answer rather than a failure. This one only has to be long enough that
+ * firing it really does mean something is wrong.
+ */
+private const val EVAL_TIMEOUT_MS = 30_000L
+
+/**
  * Drives a BeanShell debug session. The forked JVM runs the script -- rewritten with hook calls,
  * or untouched under the instrumenting agent, see [BshInstrumentationMode] -- whose agent connects
  * back to [server]; each reported statement is either paused (breakpoint / stepping) or released
  * immediately.
  *
  * Framing, agent to IDE: [EVT_STOPPED] `int line, int callDepth, int frameCount,
- * (utf name, utf sourceFile, int line)*`, plus [EVT_SCOPES] / [EVT_VARIABLES] answering a request.
- * IDE to agent: [CMD_RESUME], optionally preceded by [CMD_SET_BREAKPOINTS] and
- * [CMD_SET_RUN_MODE] when [pushFilterToAgent] lets the agent filter for itself, and
- * [CMD_SCOPES] / [CMD_VARIABLES] while suspended.
+ * (utf name, utf sourceFile, int line)*`, plus [EVT_SCOPES], [EVT_VARIABLES], [EVT_EVALUATED] and
+ * [EVT_VARIABLE_SET] answering a request. IDE to agent: [CMD_RESUME], optionally preceded by
+ * [CMD_SET_BREAKPOINTS] and [CMD_SET_RUN_MODE] when [pushFilterToAgent] lets the agent filter for
+ * itself, and [CMD_SCOPES] / [CMD_VARIABLES] / [CMD_EVALUATE] / [CMD_SET_VARIABLE] while suspended.
+ * The full table is in `BshDebugProtocol.kt`.
  *
  * Variables are pulled rather than pushed. The agent hands out an opaque handle per expandable
  * value, valid only until the next resume, which is what lets a nested object be opened one level
@@ -75,6 +85,12 @@ class BshDebugProcess(
      * reporting everything as before.
      */
     private val pushFilterToAgent: Boolean = false,
+    /**
+     * Whether the agent on the other end can evaluate expressions, which decides whether the UI
+     * offers Watches and Set Value. True under the instrumenting agent, which holds the
+     * `Interpreter`; false on the rewriting path, which is handed only a `NameSpace`.
+     */
+    override val supportsEvaluation: Boolean = false,
 ) : XDebugProcess(session), BshValueSource {
 
     private val editorsProvider = BshDebuggerEditorsProvider()
@@ -100,6 +116,9 @@ class BshDebugProcess(
      */
     private val responses = ArrayBlockingQueue<Any>(1)
     private val requestLock = Any()
+
+    /** Set once a request went unanswered, after which no reply can be placed. See [exchange]. */
+    @Volatile private var desynced = false
 
     override fun createConsole(): ExecutionConsole {
         val console = TextConsoleBuilderFactory.getInstance().createBuilder(session.project).console
@@ -208,6 +227,7 @@ class BshDebugProcess(
                     EVT_STOPPED -> readStopped(input)
                     EVT_SCOPES -> responses.offer(readScopesReply(input))
                     EVT_VARIABLES -> responses.offer(readVariablesReply(input))
+                    EVT_EVALUATED, EVT_VARIABLE_SET -> responses.offer(readEvalReply(input))
                     // An opcode we do not know means the stream is no longer framed the way we
                     // think it is, and every later read would be garbage. Stop rather than guess.
                     else -> return
@@ -237,17 +257,57 @@ class BshDebugProcess(
             },
         )
 
+    private fun readEvalReply(input: DataInputStream): BshEvalResult =
+        BshEvalResult(input.readBoolean(), input.readUTF(), input.readUTF(), input.readInt())
+
     private class ScopesReply(val scopes: List<Pair<String, Int>>)
     private class VariablesReply(val variables: List<BshVariable>)
 
-    override fun scopes(frameId: Int): List<Pair<String, Int>> =
-        (exchange { it.writeByte(CMD_SCOPES); it.writeInt(frameId) } as? ScopesReply)?.scopes.orEmpty()
+    override fun scopes(frameId: Int): List<Pair<String, Int>> = (
+        exchange({ it.writeByte(CMD_SCOPES); it.writeInt(frameId) }, REQUEST_TIMEOUT_MS) as? ScopesReply
+        )?.scopes.orEmpty()
 
-    override fun variables(handle: Int): List<BshVariable> =
-        (exchange { it.writeByte(CMD_VARIABLES); it.writeInt(handle) } as? VariablesReply)?.variables.orEmpty()
+    override fun variables(handle: Int): List<BshVariable> = (
+        exchange({ it.writeByte(CMD_VARIABLES); it.writeInt(handle) }, REQUEST_TIMEOUT_MS) as? VariablesReply
+        )?.variables.orEmpty()
 
-    /** Sends one request and waits for its reply. Serialised: one request is in flight at a time. */
-    private fun exchange(write: (DataOutputStream) -> Unit): Any? = synchronized(requestLock) {
+    override fun evaluate(frameId: Int, expression: String): BshEvalResult? = exchange(
+        {
+            it.writeByte(CMD_EVALUATE)
+            it.writeInt(frameId)
+            it.writeUTF(expression)
+        },
+        EVAL_TIMEOUT_MS,
+    ) as? BshEvalResult
+
+    override fun setVariable(
+        frameId: Int,
+        containerHandle: Int,
+        name: String,
+        expression: String,
+    ): BshEvalResult? = exchange(
+        {
+            it.writeByte(CMD_SET_VARIABLE)
+            it.writeInt(frameId)
+            it.writeInt(containerHandle)
+            it.writeUTF(name)
+            it.writeUTF(expression)
+        },
+        EVAL_TIMEOUT_MS,
+    ) as? BshEvalResult
+
+    /**
+     * Sends one request and waits for its reply. Serialised: one request is in flight at a time.
+     *
+     * Replies are matched by arrival order and carry no request id, which is sound only as long as
+     * every request is answered. A timeout breaks that: the agent may still be working, and its
+     * reply would then arrive while a later request is waiting and be handed over as that request's
+     * answer. So a timeout retires the request channel for good — later calls fail fast rather than
+     * risk returning the right-looking answer to the wrong question. Correlating replies is the
+     * general fix and it belongs with threads, which need it anyway.
+     */
+    private fun exchange(write: (DataOutputStream) -> Unit, timeoutMs: Long): Any? = synchronized(requestLock) {
+        if (desynced) return null
         responses.clear()
         val out = commands ?: return null
         try {
@@ -258,7 +318,9 @@ class BshDebugProcess(
         } catch (_: Exception) {
             return null
         }
-        return responses.poll(REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        val reply = responses.poll(timeoutMs, TimeUnit.MILLISECONDS)
+        if (reply == null) desynced = true
+        return reply
     }
 
     private fun handleStep(line: Int, depth: Int, frames: List<BshFrameInfo>) {

@@ -9,38 +9,54 @@ agent ships inside the plugin and the fixtures are in the repository.
 
 ---
 
-## `evaluate` and `setVariable`
-
-The remaining two verbs of DAP's variable vocabulary. Protocol 2 has the shape for
-them — the IDE already sends requests and reads replies while suspended, so each is
-one opcode and one reply, not a reframing.
-
-`evaluate(frameId, expression)` is what the Watches panel and the Evaluate dialog
-need. It is reachable: the hook holds the `Interpreter`, so
-`interpreter.eval(expr, namespace)` works, verified. The result gets a handle like
-any other value, so a watched expression expands the same way a variable does. Two
-things to get right — the re-entrancy guard already covers evaluation running
-instrumented code, and a user expression that throws must be reported as a failed
-evaluation rather than disabling the session.
-
-`setVariable(handle, name, expression)` is the same machinery in reverse, plus
-`XValueModifier` on the IDE side.
-
-Neither is available on the rewriting fallback: it holds no `Interpreter`.
-
 ## Threads
 
-The protocol carries no thread id and the hook holds a global lock while suspended,
-so two script threads cannot be told apart or suspended independently. Needs a
-protocol change, so it belongs with DAP. Exercised by
-`agent/samples/scripts/06_callbacks_threads.bsh` and `DebugHost` scenario 5.
+Two script threads cannot be told apart or suspended independently. Worth being
+precise about the size of this, because the protocol change is the *small* part and
+reads like the whole job.
+
+Exercised by `agent/samples/scripts/06_callbacks_threads.bsh` and `DebugHost`
+scenario 5.
+
+**Protocol.** A thread id on `STOPPED` and on every request, plus request ids —
+today a reply is matched by arrival order, which is sound only while one request is
+in flight (see the desync note in `BshDebugProcess.exchange`). That is a version 3,
+but it is mechanical.
+
+**The hook is the real work.** Its suspended state is all static: `LOCK`,
+`currentFrames`, `currentInterpreter`, `handles`, `nextHandle`. Making those
+per-thread is straightforward; the structural change is that **the hook has no
+thread of its own today**. A suspended thread reads its own commands off the socket,
+which cannot work once two are suspended — only one can be reading. It needs a
+dedicated reader that demultiplexes into per-thread mailboxes, and `runMode` and the
+step depth become per-thread with it. That new thread lives on the bootstrap
+classpath inside somebody else's JVM, so getting its lifecycle wrong hangs a real
+Maven build rather than a test.
+
+**IDE side.** `mode`, `stepDepth` and `currentDepth` become per-thread;
+`exchange` becomes a map of pending requests keyed by id; `XSuspendContext` gains
+`getExecutionStacks()` with one stack per thread. And a suspend policy has to be
+decided — whether a breakpoint stops the thread that hit it or all of them — which
+both JDWP and DAP make a per-breakpoint choice, so it is UI as well as plumbing.
+
+Note the ordering constraint if DAP is also on the table: [LSP4IJ] does not
+implement the `Thread` event, so a DAP transport would not carry this anyway.
 
 ---
 
 ## Turn `BshInstrumentationMode.CURRENT` into a real setting
 
 It is a compile-time constant today. The rewriting fallback is genuinely useful
-(it needs no agent jar and no JVM flag), so choosing it should not require a build.
+(it needs no agent jar and no JVM flag), so choosing it should not require a build —
+and now that only the agent can evaluate expressions, the two paths differ enough
+that the choice belongs to the user rather than to the build.
+
+## Filter BeanShell's own fields out of a scripted class instance
+
+Expanding an instance of a class declared in a script shows a `_bshThis…` field
+holding a `bsh.XThis` — BeanShell's back-reference to the object's namespace. It is
+a genuine field rather than a synthetic one, so `isSynthetic()` does not catch it and
+the only handle on it is the name. Cosmetic, but it is on every scripted object.
 
 ## DAP as the transport
 
@@ -51,8 +67,8 @@ DAP** ([IJPL-83441] is open), and [LSP4IJ] supplies a general DAP client that la
 last gap being exactly the threads item above.
 
 Having adopted the vocabulary first — protocol 2 is `stackTrace`/`scopes`/
-`variables` with lazy handles under different names — is what makes this a
-transport swap rather than a redesign. A DAP-speaking agent is a debug adapter any
+`variables`/`evaluate`/`setVariable` with lazy handles, under different names — is
+what makes this a transport swap rather than a redesign. A DAP-speaking agent is a debug adapter any
 DAP client can attach to, which is why the agent stays an independently publishable
 subproject rather than a source set of the plugin.
 

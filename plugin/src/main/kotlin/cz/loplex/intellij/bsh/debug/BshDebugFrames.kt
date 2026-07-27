@@ -1,6 +1,7 @@
 package cz.loplex.intellij.bsh.debug
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -12,12 +13,14 @@ import com.intellij.xdebugger.XExpression
 import com.intellij.xdebugger.XSourcePosition
 import com.intellij.xdebugger.evaluation.EvaluationMode
 import com.intellij.xdebugger.evaluation.XDebuggerEditorsProvider
+import com.intellij.xdebugger.evaluation.XDebuggerEvaluator
 import com.intellij.xdebugger.frame.XCompositeNode
 import com.intellij.xdebugger.frame.XExecutionStack
 import com.intellij.xdebugger.frame.XStackFrame
 import com.intellij.xdebugger.frame.XSuspendContext
 import com.intellij.xdebugger.frame.XValue
 import com.intellij.xdebugger.frame.XValueChildrenList
+import com.intellij.xdebugger.frame.XValueModifier
 import com.intellij.xdebugger.frame.XValueNode
 import com.intellij.xdebugger.frame.XValuePlace
 import cz.loplex.intellij.bsh.BshFileType
@@ -29,17 +32,39 @@ data class BshFrameInfo(val id: Int, val name: String, val sourceFile: String, v
 data class BshVariable(val name: String, val value: String, val type: String, val childHandle: Int)
 
 /**
- * Fetches on demand what the agent no longer pushes.
+ * The answer to an expression the agent ran for us.
+ *
+ * A failure is an ordinary answer rather than an exception, because a mistyped watch expression is
+ * ordinary use: [value] then carries the reason instead of a rendering.
+ */
+data class BshEvalResult(val ok: Boolean, val value: String, val type: String, val childHandle: Int)
+
+/**
+ * Fetches on demand what the agent no longer pushes, and asks it to run expressions.
  *
  * Every call blocks the thread it is made on until the agent answers, which is what the platform
  * expects: it calls `computeChildren` off the UI thread precisely so an implementation may go and
- * ask something slow.
+ * ask something slow. The two evaluating calls return null when the agent never answered at all —
+ * distinct from an answer that says "no".
  */
 interface BshValueSource {
+    /**
+     * Whether the agent on the other end can run expressions at all.
+     *
+     * False on the source-rewriting path, which is handed a `NameSpace` and no `Interpreter`. The UI
+     * then offers neither Watches nor Set Value, rather than offering them and failing.
+     */
+    val supportsEvaluation: Boolean
+
     /** Scopes of one frame, as `name to handle`. */
     fun scopes(frameId: Int): List<Pair<String, Int>>
 
     fun variables(handle: Int): List<BshVariable>
+
+    fun evaluate(frameId: Int, expression: String): BshEvalResult?
+
+    /** Stores the value of [expression] into the [name] child of [containerHandle]. */
+    fun setVariable(frameId: Int, containerHandle: Int, name: String, expression: String): BshEvalResult?
 }
 
 class BshSuspendContext(
@@ -87,11 +112,15 @@ class BshStackFrame(
         val children = XValueChildrenList()
         for ((_, handle) in source.scopes(info.id)) {
             for (variable in source.variables(handle)) {
-                children.add(variable.name, BshValue(variable, source))
+                children.add(variable.name, BshValue(variable, source, info.id, handle))
             }
         }
         node.addChildren(children, true)
     }
+
+    /** Watches and the Evaluate dialog evaluate in the scope of whichever frame is selected. */
+    override fun getEvaluator(): XDebuggerEvaluator? =
+        if (source.supportsEvaluation) BshEvaluator(info.id, source) else null
 
     /** What the Frames panel shows. `global` is bsh's name for the script's top level. */
     override fun customizePresentation(component: com.intellij.ui.ColoredTextContainer) {
@@ -107,6 +136,13 @@ class BshStackFrame(
 class BshValue(
     private val variable: BshVariable,
     private val source: BshValueSource,
+    /** The frame this value was read in, which is also where a replacement expression is evaluated. */
+    private val frameId: Int,
+    /**
+     * The handle of the value this one is a child of, or [NO_HANDLE] when there is nothing to write
+     * into — an expression's own result has no container, so it cannot be assigned to.
+     */
+    private val containerHandle: Int,
 ) : XValue() {
 
     override fun computePresentation(node: XValueNode, place: XValuePlace) {
@@ -125,10 +161,115 @@ class BshValue(
         }
         val children = XValueChildrenList()
         for (child in source.variables(variable.childHandle)) {
-            children.add(child.name, BshValue(child, source))
+            children.add(child.name, BshValue(child, source, frameId, variable.childHandle))
         }
         node.addChildren(children, true)
     }
+
+    override fun getModifier(): XValueModifier? =
+        if (source.supportsEvaluation && containerHandle != NO_HANDLE) {
+            BshValueModifier(variable, source, frameId, containerHandle)
+        } else {
+            null
+        }
+}
+
+/**
+ * Evaluates an expression in the scope of one frame.
+ *
+ * The exchange with the agent blocks, and the platform calls [evaluate] from the UI thread for the
+ * Evaluate dialog, so the request goes to a pooled thread — the callback is built to be invoked
+ * later, from wherever the answer arrives.
+ */
+private class BshEvaluator(
+    private val frameId: Int,
+    private val source: BshValueSource,
+) : XDebuggerEvaluator() {
+
+    override fun evaluate(expression: String, callback: XEvaluationCallback, expressionPosition: XSourcePosition?) {
+        onPooledThread {
+            val result = source.evaluate(frameId, expression)
+            when {
+                result == null -> callback.errorOccurred(NO_ANSWER)
+                !result.ok -> callback.errorOccurred(result.value)
+                else -> callback.evaluated(
+                    BshValue(
+                        BshVariable(expression, result.value, result.type, result.childHandle),
+                        source,
+                        frameId,
+                        // A result is not stored anywhere, so there is nothing to assign back into.
+                        NO_HANDLE,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Changes a value by handing the agent a replacement expression, which it evaluates in the frame the
+ * value was read in — so `count + 1` and `other.name` mean there what they would mean in the script.
+ */
+private class BshValueModifier(
+    private val variable: BshVariable,
+    private val source: BshValueSource,
+    private val frameId: Int,
+    private val containerHandle: Int,
+) : XValueModifier() {
+
+    override fun setValue(expression: XExpression, callback: XModificationCallback) {
+        onPooledThread {
+            val result = source.setVariable(frameId, containerHandle, variable.name, expression.expression)
+            when {
+                result == null -> callback.errorOccurred(NO_ANSWER)
+                !result.ok -> callback.errorOccurred(result.value)
+                else -> callback.valueModified()
+            }
+        }
+    }
+
+    /**
+     * Prefills the editor with the current value, but only where its rendering happens to be a
+     * BeanShell literal too. A `toString()` is not generally an expression, so offering `Point@1c2f`
+     * back would hand the user something that cannot even parse; those open empty instead.
+     */
+    override fun getInitialValueEditorText(): String? = when {
+        variable.type == "String" -> quotedLiteral(variable.value)
+        variable.type in LITERAL_TYPES -> variable.value
+        else -> null
+    }
+}
+
+/**
+ * Types whose rendering can be handed straight back as an expression.
+ *
+ * Deliberately short of every scalar: a `float` renders as `1.5`, which is a *double* literal and
+ * may then be refused as a narrowing assignment, and the same doubt applies to `short` and `byte`.
+ * Prefilled text that fails when submitted unchanged is worse than an empty editor.
+ */
+private val LITERAL_TYPES = setOf("int", "Integer", "long", "Long", "double", "Double", "boolean", "Boolean")
+
+private const val NO_ANSWER = "The debugged script did not answer"
+
+private fun quotedLiteral(value: String): String = buildString(value.length + 2) {
+    append('"')
+    for (character in value) {
+        when (character) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> append(character)
+        }
+    }
+    append('"')
+}
+
+// Wrapped explicitly rather than passed as a lambda: executeOnPooledThread is overloaded for
+// Runnable and Callable, and a Kotlin `() -> Unit` fits both.
+private fun onPooledThread(work: () -> Unit) {
+    ApplicationManager.getApplication().executeOnPooledThread(Runnable { work() })
 }
 
 /** Lets the debugger's expression fields use BeanShell. */

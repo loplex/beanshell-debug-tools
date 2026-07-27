@@ -5,6 +5,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.Socket;
 import java.util.ArrayList;
@@ -24,12 +25,11 @@ import java.util.Set;
  * BeanShell type (the bootstrap loader cannot see them), hence {@code Object} parameters and
  * reflection throughout. Configuration arrives through system properties for the same reason.
  *
- * <p>The outbound wire format is unchanged from the script-rewriting agent this replaces, so an
- * unmodified IDE keeps working: per reported statement it writes {@code line}, {@code depth},
- * {@code variableCount} and then {@code name}/{@code value} pairs, then blocks for a response.
- * The return channel gained optional commands — see {@link #CMD_RESUME} and friends — but the
- * single {@code 0x01} byte the old IDE sends still means "resume", and an IDE that sends nothing
- * else gets exactly the old behaviour. Failure handling matches too, see {@link #onEval}.
+ * <p>The wire format is protocol 2, opcode-tagged in both directions and documented in
+ * {@code agent/README.md}. Per reported statement the hook writes {@link #EVT_STOPPED} with the
+ * call stack and then blocks, answering whatever the IDE asks about the suspended frames —
+ * scopes, variables, an expression to evaluate, a value to change — until it is resumed. Failure
+ * handling is described on {@link #onEval}.
  */
 public final class BshHook {
 
@@ -118,16 +118,13 @@ public final class BshHook {
     private static final String BLOCK = "BSHBlock";
 
     /*
-     * Commands the IDE may send on the return channel.
+     * Commands the IDE may send on the return channel. RESUME releases a reported statement; any
+     * number of the others may precede it.
      *
-     * The original protocol had the IDE reply with a single byte to release a reported statement.
-     * That byte is now RESUME, and any number of other commands may precede it, so an IDE that
-     * only ever sends 0x01 keeps working unchanged.
-     *
-     * Until the IDE sends SET_BREAKPOINTS at least once every statement is reported, because an
-     * older IDE that configures nothing must not go blind. Once it does, the agent falls silent
-     * while running and speaks up only at a breakpoint, which removes the round-trip per
-     * statement that made a plain loop crawl.
+     * Until the IDE sends SET_BREAKPOINTS at least once every statement is reported, because an IDE
+     * that configures nothing must not go blind. Once it does, the agent falls silent while running
+     * and speaks up only at a breakpoint, which removes the round-trip per statement that made a
+     * plain loop crawl.
      */
     private static final int CMD_RESUME = 0x01;
     private static final int CMD_SET_BREAKPOINTS = 0x02;
@@ -144,6 +141,8 @@ public final class BshHook {
      */
     private static final int CMD_SCOPES = 0x04;
     private static final int CMD_VARIABLES = 0x05;
+    private static final int CMD_EVALUATE = 0x06;
+    private static final int CMD_SET_VARIABLE = 0x07;
 
     /*
      * The agent-to-IDE direction is opcode-tagged as of protocol 2. It used to be a bare stream of
@@ -156,6 +155,8 @@ public final class BshHook {
     private static final int EVT_STOPPED = 0x10;
     private static final int EVT_SCOPES = 0x11;
     private static final int EVT_VARIABLES = 0x12;
+    private static final int EVT_EVALUATED = 0x13;
+    private static final int EVT_VARIABLE_SET = 0x14;
 
     /**
      * Handle 0 is never issued, so the IDE can use it to mean "this value has no children" without
@@ -181,9 +182,11 @@ public final class BshHook {
     private static int runMode = MODE_RUN;
 
     /**
-     * Guards against re-entering the interpreter. Reading variables — and, later, evaluating
-     * watch expressions — runs BeanShell code, which is itself instrumented. Without this a
-     * single reported statement would recurse until the stack overflowed.
+     * Guards against re-entering the interpreter. Reading a variable runs BeanShell code, and
+     * evaluating a watch expression runs whatever the user typed — both of which are themselves
+     * instrumented. Without this a single reported statement would recurse until the stack
+     * overflowed. It stays set for the whole of {@link #report}, so everything served while
+     * suspended is covered, including an expression that calls a script method.
      */
     private static final ThreadLocal<Boolean> REPORTING = new ThreadLocal<Boolean>();
 
@@ -214,6 +217,8 @@ public final class BshHook {
     private static Method nameSpaceGetName;
     private static Field nameSpaceCallerInfoNode;
     private static Class<?> nameSpaceClass;
+    private static Method interpreterEval;
+    private static Method primitiveGetType;
     private static boolean reflectionFailed;
 
     /**
@@ -229,6 +234,15 @@ public final class BshHook {
 
     /** The frames of the current stop, innermost first. Empty while running. */
     private static Object[] currentFrames = new Object[0];
+
+    /**
+     * The {@code bsh.Interpreter} of the current stop, or null while running.
+     *
+     * <p>Kept only for the duration of a stop, alongside {@link #currentFrames}: it is what makes
+     * evaluating an expression possible, and holding it any longer would pin an interpreter the
+     * script may have finished with.
+     */
+    private static Object currentInterpreter;
 
     static {
         int parsed = -1;
@@ -312,7 +326,7 @@ public final class BshHook {
                 drainPendingCommands();
                 return;
             }
-            report(line, sourceFile, callstack);
+            report(line, sourceFile, callstack, interpreter);
         } catch (Throwable t) {
             // Never let a debugging problem change the behaviour of the debugged script.
             disabled = true;
@@ -472,6 +486,18 @@ public final class BshHook {
             case CMD_VARIABLES:
                 writeVariables(in.readInt());
                 break;
+            case CMD_EVALUATE: {
+                int frameId = in.readInt();
+                writeEvaluated(EVT_EVALUATED, evaluate(frameId, in.readUTF()));
+                break;
+            }
+            case CMD_SET_VARIABLE: {
+                int frameId = in.readInt();
+                int handle = in.readInt();
+                String name = in.readUTF();
+                writeEvaluated(EVT_VARIABLE_SET, assign(frameId, handle, name, in.readUTF()));
+                break;
+            }
             default:
                 // RESUME, and anything unrecognised, which a future IDE must not be able to
                 // wedge the agent with. Treating it as a release is the safe reading: the worst
@@ -523,7 +549,8 @@ public final class BshHook {
         return slash < 0 ? sourceFile : sourceFile.substring(slash + 1);
     }
 
-    private static void report(int line, String sourceFile, Object callstack) throws Exception {
+    private static void report(int line, String sourceFile, Object callstack, Object interpreter)
+            throws Exception {
         int depth = (Integer) callStackDepth.invoke(callstack);
         Object[] frames = frames(callstack);
         synchronized (LOCK) {
@@ -540,6 +567,7 @@ public final class BshHook {
                 }
             }
             currentFrames = frames;
+            currentInterpreter = interpreter;
             try {
                 out.writeByte(EVT_STOPPED);
                 out.writeInt(line);
@@ -564,6 +592,7 @@ public final class BshHook {
             } finally {
                 releaseHandles();
                 currentFrames = new Object[0];
+                currentInterpreter = null;
             }
         }
     }
@@ -635,7 +664,7 @@ public final class BshHook {
      * and a protocol change if the level does not exist.
      */
     private static void writeScopes(int frameId) throws IOException {
-        Object namespace = frameId >= 0 && frameId < currentFrames.length ? currentFrames[frameId] : null;
+        Object namespace = frame(frameId);
         out.writeByte(EVT_SCOPES);
         if (namespace == null) {
             out.writeInt(0);
@@ -676,6 +705,240 @@ public final class BshHook {
             out.writeInt(expandable(values.get(i)) ? handleFor(values.get(i)) : NO_HANDLE);
         }
         out.flush();
+    }
+
+    /** The namespace of one frame of the current stop, or null when there is no such frame. */
+    private static Object frame(int frameId) {
+        return frameId >= 0 && frameId < currentFrames.length ? currentFrames[frameId] : null;
+    }
+
+    /** Either a value, or the reason there is not one. Both are ordinary answers. */
+    private static final class Outcome {
+        final boolean ok;
+        final String text;
+        final Object value;
+
+        private Outcome(boolean ok, String text, Object value) {
+            this.ok = ok;
+            this.text = text;
+            this.value = value;
+        }
+
+        static Outcome of(Object value) {
+            return new Outcome(true, render(value), value);
+        }
+
+        static Outcome failed(String reason) {
+            return new Outcome(false, reason, null);
+        }
+    }
+
+    /** Writes an {@link Outcome} as the reply to whichever request produced it. */
+    private static void writeEvaluated(int event, Outcome outcome) throws IOException {
+        out.writeByte(event);
+        out.writeBoolean(outcome.ok);
+        out.writeUTF(truncate(outcome.text));
+        out.writeUTF(outcome.ok ? typeName(outcome.value) : "");
+        out.writeInt(outcome.ok && expandable(outcome.value) ? handleFor(outcome.value) : NO_HANDLE);
+        out.flush();
+    }
+
+    /**
+     * Answers {@link #CMD_EVALUATE}: runs an expression in one frame's scope.
+     *
+     * <p>The interpreter does the evaluating, so a watch expression sees exactly what the script
+     * sees at that point — its variables, its methods, its imports — rather than a reimplementation
+     * of BeanShell's name resolution. Whatever the expression throws comes back as a failed
+     * outcome: a mistyped watch is a message in the IDE, not a broken session.
+     *
+     * <p>Note that {@code Interpreter.eval} returns plain Java, unwrapping the {@code bsh.Primitive}
+     * that a namespace lookup would hand back, so the result needs no conversion here.
+     */
+    private static Outcome evaluate(int frameId, String expression) {
+        Object namespace = frame(frameId);
+        if (namespace == null) {
+            return Outcome.failed("No frame " + frameId + " at this stop");
+        }
+        if (currentInterpreter == null) {
+            return Outcome.failed("No interpreter available at this stop");
+        }
+        try {
+            if (interpreterEval == null) {
+                interpreterEval = accessible(
+                        currentInterpreter.getClass().getMethod("eval", String.class, nameSpaceClass));
+            }
+            return Outcome.of(interpreterEval.invoke(currentInterpreter, expression, namespace));
+        } catch (Throwable t) {
+            return Outcome.failed(describe(t, expression));
+        }
+    }
+
+    /**
+     * Answers {@link #CMD_SET_VARIABLE}: evaluates an expression and stores it into {@code handle}.
+     *
+     * <p>A variable in scope is assigned by evaluating the assignment itself, so BeanShell applies
+     * its own rules rather than this code guessing at them: a typed variable refuses an
+     * incompatible value exactly as the script would, and a variable inherited from an enclosing
+     * scope is updated where it was declared instead of being shadowed here. Anything else — a
+     * field, an array element, a list slot, a map entry — is reached reflectively, since there is no
+     * expression that names it.
+     */
+    private static Outcome assign(int frameId, int handle, String name, String expression) {
+        if (frame(frameId) == null) {
+            return Outcome.failed("No frame " + frameId + " at this stop");
+        }
+        Object target = handles.get(Integer.valueOf(handle));
+        if (target == null) {
+            return Outcome.failed("This value is no longer available");
+        }
+        if (isNameSpace(target)) {
+            Outcome assigned = evaluate(frameId, name + " = (" + expression + ")");
+            if (!assigned.ok) {
+                return assigned;
+            }
+            // Read the variable back rather than reporting what went in: BeanShell may have coerced
+            // it to the declared type, and the IDE should show what is actually stored.
+            try {
+                return Outcome.of(nameSpaceGetVariable.invoke(target, name));
+            } catch (Throwable t) {
+                return assigned;
+            }
+        }
+        Outcome evaluated = evaluate(frameId, expression);
+        return evaluated.ok ? store(target, name, evaluated.value) : evaluated;
+    }
+
+    /** Stores an already-evaluated value into an array element, a list slot, a map entry or a field. */
+    @SuppressWarnings("unchecked")
+    private static Outcome store(Object target, String name, Object value) {
+        try {
+            if (target.getClass().isArray()) {
+                int index = indexIn(name);
+                if (index < 0 || index >= java.lang.reflect.Array.getLength(target)) {
+                    return Outcome.failed("Not an element of this array: " + name);
+                }
+                java.lang.reflect.Array.set(target, index, value);
+                return Outcome.of(java.lang.reflect.Array.get(target, index));
+            }
+            if (target instanceof List) {
+                List<Object> list = (List<Object>) target;
+                int index = indexIn(name);
+                if (index < 0 || index >= list.size()) {
+                    return Outcome.failed("Not an element of this list: " + name);
+                }
+                list.set(index, value);
+                return Outcome.of(list.get(index));
+            }
+            if (target instanceof Map) {
+                return storeInMap((Map<Object, Object>) target, name, value);
+            }
+            if (target instanceof Iterable) {
+                // The child names here are iteration positions rather than identities, so there is
+                // nothing to assign through. Refusing beats writing to whatever happens to sit at
+                // that position this time round.
+                return Outcome.failed("Elements of a " + simpleName(target) + " cannot be assigned by position");
+            }
+            Field field = declaredField(target.getClass(), name);
+            if (field == null) {
+                return Outcome.failed("No field " + name + " on " + simpleName(target));
+            }
+            field.setAccessible(true);
+            field.set(target, value);
+            return Outcome.of(field.get(target));
+        } catch (Throwable t) {
+            return Outcome.failed(reason(t));
+        }
+    }
+
+    /**
+     * A map entry is addressed by its key's rendering, because that is the only name the protocol
+     * carries. Two keys that render alike are therefore ambiguous, and writing to whichever came
+     * first would be a silent guess — so that case is refused rather than resolved.
+     */
+    private static Outcome storeInMap(Map<Object, Object> map, String name, Object value) {
+        Object key = null;
+        boolean found = false;
+        for (Object candidate : map.keySet()) {
+            if (name.equals(String.valueOf(candidate))) {
+                if (found) {
+                    return Outcome.failed("Ambiguous key: more than one entry renders as " + name);
+                }
+                key = candidate;
+                found = true;
+            }
+        }
+        if (!found) {
+            return Outcome.failed("No entry " + name + " in this map");
+        }
+        // Written through the map rather than through Map.Entry.setValue, which not every
+        // implementation honours once iteration has finished.
+        map.put(key, value);
+        return Outcome.of(map.get(key));
+    }
+
+    /** Walks outwards exactly as {@link #collectValue} does when it lists the fields. */
+    private static Field declaredField(Class<?> type, String name) {
+        for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                // not at this level; keep walking
+            }
+        }
+        return null;
+    }
+
+    /** The index in a synthetic {@code [n]} child name, or -1 when the name is not one. */
+    private static int indexIn(String name) {
+        if (name.length() < 3 || name.charAt(0) != '[' || name.charAt(name.length() - 1) != ']') {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(name.substring(1, name.length() - 1));
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+    }
+
+    /** Reflection reports the real failure as a cause; the wrapper itself says nothing useful. */
+    private static String reason(Throwable error) {
+        Throwable cause = error instanceof InvocationTargetException && error.getCause() != null
+                ? error.getCause()
+                : error;
+        String message = cause.getMessage();
+        return message == null || message.isEmpty() ? cause.getClass().getName() : message;
+    }
+
+    /**
+     * A BeanShell error as one readable line.
+     *
+     * <p>Its messages lead with the source and an echo of the expression — {@code Sourced file:
+     * inline evaluation of: ``x = 1;'' : the part that matters} — and then continue with a script
+     * stack trace on further lines. Only the tail of the first line belongs in an IDE error field.
+     *
+     * <p>The search for the echo's closing quotes starts past the expression, so quotes inside what
+     * the user typed cannot split the message in the wrong place. An unrecognised shape falls back
+     * to the whole first line, which is verbose rather than wrong.
+     */
+    private static String describe(Throwable error, String expression) {
+        String message = reason(error);
+        int newline = message.indexOf('\n');
+        if (newline >= 0) {
+            message = message.substring(0, newline);
+        }
+        int echo = message.indexOf("``");
+        if (echo < 0) {
+            return message;
+        }
+        int close = message.indexOf("''", echo + 2 + expression.length());
+        if (close < 0) {
+            return message;
+        }
+        String tail = message.substring(close + 2).trim();
+        if (tail.startsWith(":")) {
+            tail = tail.substring(1).trim();
+        }
+        return tail.isEmpty() ? message : tail;
     }
 
     /**
@@ -801,8 +1064,34 @@ public final class BshHook {
         }
     }
 
+    /**
+     * The type to show for a value.
+     *
+     * <p>{@code bsh.Primitive} needs unwrapping here for the same reason it is a leaf in
+     * {@link #expandable}: it wraps every scripted number and boolean, so its own class name is
+     * BeanShell's plumbing rather than anything the user declared. {@code Primitive.NULL} carries no
+     * type at all, and {@code null} is the honest label for it.
+     */
     private static String typeName(Object value) {
-        return value == null ? "" : simpleName(value);
+        if (value == null) {
+            return "";
+        }
+        if (PRIMITIVE_CLASS.equals(value.getClass().getName())) {
+            Class<?> type = primitiveType(value);
+            return type == null ? "null" : type.getSimpleName();
+        }
+        return simpleName(value);
+    }
+
+    private static Class<?> primitiveType(Object primitive) {
+        try {
+            if (primitiveGetType == null) {
+                primitiveGetType = accessible(primitive.getClass().getMethod("getType"));
+            }
+            return (Class<?>) primitiveGetType.invoke(primitive);
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private static boolean isNameSpace(Object candidate) {

@@ -5,12 +5,16 @@ import com.intellij.psi.PsiErrorElement
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import cz.loplex.intellij.bsh.debug.BshDebugInstrumenter
+import cz.loplex.intellij.bsh.debug.CMD_EVALUATE
 import cz.loplex.intellij.bsh.debug.CMD_RESUME
 import cz.loplex.intellij.bsh.debug.CMD_SCOPES
+import cz.loplex.intellij.bsh.debug.CMD_SET_VARIABLE
 import cz.loplex.intellij.bsh.debug.CMD_VARIABLES
+import cz.loplex.intellij.bsh.debug.EVT_EVALUATED
 import cz.loplex.intellij.bsh.debug.EVT_SCOPES
 import cz.loplex.intellij.bsh.debug.EVT_STOPPED
 import cz.loplex.intellij.bsh.debug.EVT_VARIABLES
+import cz.loplex.intellij.bsh.debug.EVT_VARIABLE_SET
 import cz.loplex.intellij.bsh.debug.agent.BshDebugAgent
 import cz.loplex.intellij.bsh.psi.BshFile
 import java.io.DataInputStream
@@ -64,6 +68,7 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
 
         val output = ArrayList<String>()
         val frames = ArrayList<Frame>()
+        val refusals = ArrayList<String>()
         ServerSocket(0).use { server ->
             server.soTimeout = 30_000
             val process = ProcessBuilder(
@@ -108,6 +113,32 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
                                 input.readInt()
                             }
                         }
+                        // This path cannot evaluate -- it is handed a NameSpace, not an Interpreter --
+                        // and the point of the assertion is that it *answers*. An opcode it does not
+                        // serve would otherwise fall through to "resume", silently letting the script
+                        // run on because the IDE asked a question. Reading EVT_* here proves it did not.
+                        out.writeByte(CMD_EVALUATE)
+                        out.writeInt(0)
+                        out.writeUTF("1 + 1")
+                        out.flush()
+                        assertEquals(EVT_EVALUATED, input.readByte().toInt() and 0xFF)
+                        assertFalse("evaluation refused, not answered", input.readBoolean())
+                        refusals.add(input.readUTF())
+                        input.readUTF()
+                        input.readInt()
+
+                        out.writeByte(CMD_SET_VARIABLE)
+                        out.writeInt(0)
+                        out.writeInt(1)
+                        out.writeUTF("y")
+                        out.writeUTF("0")
+                        out.flush()
+                        assertEquals(EVT_VARIABLE_SET, input.readByte().toInt() and 0xFF)
+                        assertFalse("assignment refused, not answered", input.readBoolean())
+                        refusals.add(input.readUTF())
+                        input.readUTF()
+                        input.readInt()
+
                         frames.add(Frame(line, depth, vars))
                         out.writeByte(CMD_RESUME)
                         out.flush()
@@ -124,5 +155,6 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
         assertTrue("statement lines are reported", frames.map { it.line }.containsAll(listOf(2, 3, 4)))
         assertTrue("call depth increases inside the method", frames.maxOf { it.depth } > frames.minOf { it.depth })
         assertEquals("variable captured", "11", frames.first { it.line == 4 }.vars["y"])
+        assertTrue("every refusal explains itself", refusals.isNotEmpty() && refusals.all { it.isNotBlank() })
     }
 }

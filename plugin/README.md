@@ -61,8 +61,12 @@ running scripts out of the box.
 - Uses the **project JDK** when available (falls back to the IDE runtime).
 
 ### Debugging
-- A **source-level debugger** for `.bsh` files: line breakpoints, a variables
-  view, and Step Over / Into / Out (see [docs/DEBUGGING.md](docs/DEBUGGING.md)).
+- A **source-level debugger** for `.bsh` files: line breakpoints, the call stack,
+  Step Over / Into / Out, and Run to Cursor
+  (see [docs/DEBUGGING.md](docs/DEBUGGING.md)).
+- A **variables view** that expands nested objects, collections, maps and arrays,
+  plus **Watches**, the **Evaluate** dialog, and **Set Value** on a variable — all
+  evaluated by the real interpreter in the selected frame.
 - With the Java plugin present, breakpoints in the **Java code** called from a
   script are honored by a companion Java (JDWP) debug session.
 

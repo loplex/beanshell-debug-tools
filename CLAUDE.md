@@ -14,8 +14,18 @@ plugin/            :plugin              IntelliJ plugin -- language support and 
 agent/instrument/  :agent:instrument    bsh-debug-agent -- premain + the ASM transformer, shaded
 agent/hook/        :agent:hook          bsh-debug-hook  -- the class instrumented BeanShell calls into
 agent/samples/     :agent:samples       debugger fixtures; nothing ships from here
+agent/checks/      --                   end-to-end agent checks, as bash scripts
 docs/              repository-wide docs
 ```
+
+```bash
+./agent/checks/run-all.sh                       # the agent, end to end
+```
+
+`agent/checks/` covers what a JVM test cannot arrange from inside itself: a real `mvn`
+process (so a real plugin realm), a JVM launched with `-javaagent`, and two processes
+talking over the debug socket. Run it after touching the agent or the wire protocol —
+[`agent/checks/README.md`](agent/checks/README.md) says what each check protects.
 
 ```bash
 JAVA_HOME=<jdk17+> ./gradlew build              # everything, with tests

@@ -61,6 +61,24 @@ tasks.register<JavaExec>("runHostWithAgent") {
     jvmArgumentProviders.add(CommandLineArgumentProvider { listOf(agentArgument.get()) })
 }
 
+// What the checks in agent/checks/ need to launch a JVM themselves: the BeanShell classpath and
+// the agent jar, printed as plain paths. They drive java directly rather than through Gradle,
+// because they vary -javaagent, system properties and which fixture runs -- so they need the paths
+// rather than a task. Printing them here keeps the checks from guessing at the Gradle cache layout.
+tasks.register("printPaths") {
+    group = "verification"
+    description = "Print BSH_CLASSPATH and AGENT_JAR as shell assignments, for agent/checks/"
+    val runtime = sourceSets["main"].runtimeClasspath
+    val agent = agentJar.elements
+    // Declared so Gradle actually builds what the paths point at. Resolving a configuration inside
+    // doLast yields a path whether or not the jar exists; the checks then fail on a missing file.
+    dependsOn(agentJar, runtime)
+    doLast {
+        println("BSH_CLASSPATH=" + runtime.asPath)
+        println("AGENT_JAR=" + agent.get().single().asFile.absolutePath)
+    }
+}
+
 // Every fixture, through Interpreter.run() rather than eval(). Takes -Pscript=NN_name.bsh.
 tasks.register<JavaExec>("runScript") {
     group = "verification"

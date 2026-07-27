@@ -85,9 +85,14 @@ function and exception breakpoints, step-back, restart-frame, and `pause` — th
 the same structural limit as everywhere else, since a thread can only stop where it calls the
 hook.
 
-**What is left on the DAP side** is packaging rather than protocol: a VS Code extension (a
-`launch.json` contribution and a `.bsh` language id) so attaching does not mean hand-writing a
-configuration. Nothing in the agent blocks it.
+**The packaging this needed is done too**: [`editors/vscode/`](../editors/vscode/README.md) is
+a VS Code extension with a `launch.json` contribution and a `.bsh` language id, for both
+`attach` (to a JVM already running under the agent) and `launch` (the extension starts that JVM
+itself, since the agent's own `launch` handler is a no-op — the script is already running either
+way). [`editors/neovim/`](../editors/neovim/README.md) and
+[`editors/eclipse/`](../editors/eclipse/README.md) cover the same transport for those editors,
+the latter attach-only since Eclipse's generic DAP client has no scriptable way to launch the
+debuggee itself.
 
 [IJPL-83441]: https://youtrack.jetbrains.com/issue/IJPL-83441/Debug-adapter-protocol-support
 [LSP4IJ]: https://github.com/redhat-developer/lsp4ij

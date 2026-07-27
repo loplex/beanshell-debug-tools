@@ -15,6 +15,7 @@ agent/instrument/  :agent:instrument    bsh-debug-agent -- premain + the ASM tra
 agent/hook/        :agent:hook          bsh-debug-hook  -- the class instrumented BeanShell calls into
 agent/samples/     :agent:samples       debugger fixtures; nothing ships from here
 agent/checks/      --                   end-to-end agent checks, as bash scripts
+editors/           --                   VS Code extension, Neovim/Eclipse configs for the DAP transport
 docs/              repository-wide docs
 ```
 
@@ -57,6 +58,9 @@ coordinates and publishes just as well.
   properties. The reference for anything that touches the wire.
 - [`docs/FUTURE_WORK.md`](docs/FUTURE_WORK.md) — open work, ordered by what blocks
   what. Read before starting anything.
+- [`editors/vscode/README.md`](editors/vscode/README.md) — the VS Code extension that drives
+  the agent's DAP transport; [`editors/neovim/`](editors/neovim/README.md) and
+  [`editors/eclipse/`](editors/eclipse/README.md) cover the same transport for those editors.
 - [`docs/BEANSHELL-DEFECTS.md`](docs/BEANSHELL-DEFECTS.md) — upstream bugs in
   BeanShell 2.0b6 that a debugger runs into.
 

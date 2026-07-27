@@ -50,15 +50,22 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
             PsiManager.getInstance(project).findFile(scriptFile) as? BshFile
         } ?: throw ExecutionException("Not a BeanShell file: ${configuration.scriptPath}")
 
-        // AGENT mode instruments the interpreter and runs the script untouched; REWRITE mode
-        // prefixes hook calls into a temp copy. A missing agent jar still falls back rather than
-        // failing the launch: a degraded session beats no session, and the user asked to debug.
-        val agentJar = if (configuration.instrumentation == BshInstrumentationMode.AGENT) {
-            BshDebugAgentJar.locate()
-        } else {
-            null
+        // AGENT instruments the interpreter and runs the script untouched; REWRITE prefixes hook
+        // calls into a temp copy. A missing jar under AGENT aborts the launch -- silently rewriting
+        // would hand the user a session that looks right and quietly lacks the call stack,
+        // expandable values and Evaluate. AGENT_OR_REWRITE is the opt-in for taking that trade.
+        val mode = configuration.instrumentation
+        val agentJar = if (mode.prefersAgent) BshDebugAgentJar.locate() else null
+        if (mode == BshInstrumentationMode.AGENT && agentJar == null) {
+            throw ExecutionException(
+                "The BeanShell debug agent jar could not be located, so \"${mode.label}\" cannot run. " +
+                    "Set -D${BshDebugAgentJar.PATH_PROPERTY} to point at it, or choose " +
+                    "\"${BshInstrumentationMode.AGENT_OR_REWRITE.label}\" / " +
+                    "\"${BshInstrumentationMode.REWRITE.label}\" in the run configuration.",
+            )
         }
         val useAgent = agentJar != null
+        val startupNotice = if (!useAgent && mode.toleratesRewriteFallback) REWRITE_FALLBACK_NOTICE else null
 
         val scriptToRun: File
         val classpath: String
@@ -123,6 +130,7 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
                         pushFilterToAgent = useAgent,
                         // Only the instrumenting agent holds an Interpreter to evaluate with.
                         supportsEvaluation = useAgent,
+                        startupNotice = startupNotice,
                     )
             },
         )
@@ -134,4 +142,18 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
     }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
+
+    companion object {
+        /**
+         * What the console says when the fallback actually fires.
+         *
+         * Spells out the three missing capabilities rather than just naming the mechanism: "rewriting"
+         * means nothing to someone who only wants to debug, whereas "one frame, no expanding, no
+         * Evaluate" is exactly the set of things they will otherwise waste time looking for.
+         */
+        const val REWRITE_FALLBACK_NOTICE: String =
+            "[BeanShell] The debug agent jar could not be located, so the script was rewritten " +
+                "instead. This session shows a single stack frame, cannot expand values and has " +
+                "Evaluate disabled. Choose \"JVM agent\" in the run configuration to require the agent."
+    }
 }

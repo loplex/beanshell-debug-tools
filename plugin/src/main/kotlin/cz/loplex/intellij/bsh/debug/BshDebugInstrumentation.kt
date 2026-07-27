@@ -7,8 +7,14 @@ import java.io.File
 /**
  * How a debug session gets its hooks into a running script.
  *
- * There are two working mechanisms and they are not equivalent, so the choice is explicit rather
- * than implicit.
+ * Two mechanisms, and they are not equivalent, so the choice is explicit rather than implicit —
+ * including the choice to fall back. **Nothing here degrades silently.** Choosing [AGENT] and
+ * getting rewriting instead would be indistinguishable, from inside the IDE, from a broken agent:
+ * the frames still carry the right line numbers, so the only visible symptom is the absence of
+ * things the user may not have thought to look for (one frame instead of the stack, no expandable
+ * values, no Evaluate). A session that quietly answers a different question than the one asked is
+ * worse than one that refuses to start, so [AGENT] fails loudly and
+ * [AGENT_OR_REWRITE] is the opt-in that says "degraded is acceptable".
  */
 enum class BshInstrumentationMode(
     /**
@@ -36,6 +42,8 @@ enum class BshInstrumentationMode(
      *    when a third-party library embeds BeanShell.
      *  * **Brace-less bodies.** `if (x) foo();` cannot be rewritten without detaching the body,
      *    but the agent reports the body node without moving any text.
+     *
+     * If the agent jar cannot be found, this **fails the launch** with the reason.
      */
     AGENT("JVM agent — instrument the interpreter"),
 
@@ -43,14 +51,33 @@ enum class BshInstrumentationMode(
      * Rewrite the script before launch, prefixing a hook call to every safe statement.
      *
      * Kept because it needs nothing but a source file: no agent to attach, no JVM flag, no
-     * bootstrap classloader. That makes it the fallback when the agent jar cannot be located or
-     * when a host JVM refuses an agent.
+     * bootstrap classloader. Worth choosing deliberately on a JVM that refuses agents.
      */
     REWRITE("Rewrite the script — no agent, no JVM flag"),
+
+    /**
+     * Prefer [AGENT]; if its jar cannot be found, rewrite instead and say so in the console.
+     *
+     * For whoever would rather have a limited session than none. It is a separate mode instead of
+     * [AGENT]'s error handling because the two answer different questions — "debug this properly"
+     * versus "debug this somehow" — and only the user knows which they meant.
+     */
+    AGENT_OR_REWRITE("JVM agent, or rewrite if it is unavailable"),
     ;
 
+    /** Whether this mode may use the agent at all. */
+    val prefersAgent: Boolean get() = this == AGENT || this == AGENT_OR_REWRITE
+
+    /** Whether rewriting is an acceptable outcome when the agent jar is missing. */
+    val toleratesRewriteFallback: Boolean get() = this == AGENT_OR_REWRITE
+
     companion object {
-        /** What a run configuration starts out with, and where an unreadable setting lands. */
+        /**
+         * What a run configuration starts out with, and where an unreadable setting lands.
+         *
+         * [AGENT] rather than [AGENT_OR_REWRITE]: a default that silently degrades would make the
+         * fallback the common case again, which is the thing being fixed here.
+         */
         val DEFAULT: BshInstrumentationMode = AGENT
 
         /**
@@ -72,8 +99,9 @@ enum class BshInstrumentationMode(
  * JVM as `-javaagent:`. Same mechanism as [BshMavenExt], and for the same reason: the jar has to
  * exist as a file on disk, but its classes must not join the IDE's own classpath.
  *
- * Failure returns `null` rather than throwing — the caller falls back to
- * [BshInstrumentationMode.REWRITE], which is degraded but working.
+ * Failure returns `null` rather than throwing, so the caller can decide what that means: under
+ * [BshInstrumentationMode.AGENT] it aborts the launch, under
+ * [BshInstrumentationMode.AGENT_OR_REWRITE] it rewrites instead and says so.
  */
 object BshDebugAgentJar {
 

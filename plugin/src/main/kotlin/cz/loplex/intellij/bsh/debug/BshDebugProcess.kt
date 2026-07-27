@@ -2,6 +2,7 @@ package cz.loplex.intellij.bsh.debug
 
 import com.intellij.execution.filters.TextConsoleBuilderFactory
 import com.intellij.execution.process.ProcessHandler
+import com.intellij.execution.process.ProcessOutputTypes
 import com.intellij.execution.ui.ExecutionConsole
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.xdebugger.XDebugProcess
@@ -98,6 +99,13 @@ class BshDebugProcess(
      * `Interpreter`; false on the rewriting path, which is handed only a `NameSpace`.
      */
     override val supportsEvaluation: Boolean = false,
+    /**
+     * A line printed to the console once the session is up, or null for the ordinary case.
+     *
+     * Exists for one message: that the agent was unavailable and the session is the rewriting one.
+     * It has to be said out loud because it cannot be seen — see [sessionInitialized].
+     */
+    private val startupNotice: String? = null,
 ) : XDebugProcess(session), BshValueSource {
 
     private val editorsProvider = BshDebuggerEditorsProvider()
@@ -148,6 +156,10 @@ class BshDebugProcess(
         // startSession() does not start the process, so we must; startSessionAndShowTab() already did,
         // so we must not (its own startNotify would then fail with "startNotify called already").
         if (notifyStartOnInit && !processHandler.isStartNotified) processHandler.startNotify()
+        // After startNotify, or the console is not listening yet and the text is dropped. This is the
+        // only place the user can be told the session is a degraded one -- the frames of a rewritten
+        // script carry correct line numbers, so nothing else about the UI gives it away.
+        startupNotice?.let { processHandler.notifyTextAvailable("$it\n", ProcessOutputTypes.SYSTEM) }
     }
 
     override fun resume(context: XSuspendContext?) = proceed(BshStepMode.RUN)

@@ -97,6 +97,8 @@ object BshMavenDebugSupport {
         val lineMapper: ((String, Int) -> Int)? = null,
         /** Whether the session may offer Watches and Set Value; only the agent can evaluate. */
         val supportsEvaluation: Boolean = false,
+        /** Printed to the console once the session starts; set when the rewriting fallback fired. */
+        val startupNotice: String? = null,
     )
 
     /**

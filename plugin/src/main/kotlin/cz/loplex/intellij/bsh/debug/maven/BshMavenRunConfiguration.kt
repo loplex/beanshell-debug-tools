@@ -1,5 +1,6 @@
 package cz.loplex.intellij.bsh.debug.maven
 
+import com.intellij.execution.ExecutionException
 import com.intellij.execution.Executor
 import com.intellij.execution.configurations.ConfigurationFactory
 import com.intellij.execution.configurations.RunProfileState
@@ -7,16 +8,21 @@ import com.intellij.execution.executors.DefaultDebugExecutor
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.options.SettingsEditor
+import com.intellij.openapi.options.SettingsEditorGroup
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import cz.loplex.intellij.bsh.debug.BshDebugAgentJar
+import cz.loplex.intellij.bsh.debug.BshDebugRunner
+import cz.loplex.intellij.bsh.debug.BshInstrumentationMode
 import cz.loplex.intellij.bsh.debug.BshMavenExt
 import cz.loplex.intellij.bsh.debug.agent.BshDebugAgent
 import cz.loplex.intellij.bsh.run.BshLaunch
 import org.jetbrains.idea.maven.execution.MavenRunConfiguration
 import org.jetbrains.idea.maven.execution.MavenRunner
 import org.jetbrains.idea.maven.execution.MavenRunnerSettings
+import org.jdom.Element
 import java.io.File
 import java.net.ServerSocket
 import java.nio.charset.StandardCharsets
@@ -44,18 +50,45 @@ class BshMavenRunConfiguration(
     @Transient
     private var passthrough = false
 
+    /**
+     * How to instrument the inline script. Persisted by enum **name**, so reordering the enum cannot
+     * silently repoint a saved configuration at the other mechanism.
+     */
+    var instrumentation: BshInstrumentationMode = BshInstrumentationMode.DEFAULT
+
+    override fun getConfigurationEditor(): SettingsEditor<out MavenRunConfiguration> {
+        val group = SettingsEditorGroup<BshMavenRunConfiguration>()
+        // Maven's own editor stays exactly as it is, as the first tab; ours is added beside it.
+        @Suppress("UNCHECKED_CAST")
+        group.addEditor("Maven", super.getConfigurationEditor() as SettingsEditor<BshMavenRunConfiguration>)
+        group.addEditor("BeanShell", BshMavenSettingsEditor())
+        return group
+    }
+
+    override fun writeExternal(element: Element) {
+        super.writeExternal(element)
+        element.setAttribute(INSTRUMENTATION_ATTRIBUTE, instrumentation.name)
+    }
+
+    override fun readExternal(element: Element) {
+        super.readExternal(element)
+        instrumentation = BshInstrumentationMode.of(element.getAttributeValue(INSTRUMENTATION_ATTRIBUTE))
+    }
+
     override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState? {
         if (passthrough || executor.id != DefaultDebugExecutor.EXECUTOR_ID) {
             return super.getState(executor, environment)
         }
         val clone = clone() as BshMavenRunConfiguration
         clone.passthrough = true
-        clone.setUpBeanShellDebug(environment)
+        // Passed rather than read off the clone: whether MavenRunConfiguration.clone() carries a
+        // subclass field is its business, and relying on it would break quietly if it changed.
+        clone.setUpBeanShellDebug(environment, instrumentation)
         return clone.getState(executor, environment)
     }
 
     /** Runs on the clone: prepares instrumentation, opens the socket and injects the `-D` contract. */
-    private fun setUpBeanShellDebug(environment: ExecutionEnvironment) {
+    private fun setUpBeanShellDebug(environment: ExecutionEnvironment, mode: BshInstrumentationMode) {
         try {
             val workDirPath = runnerParameters?.workingDirPath ?: return
             val pomFile = LocalFileSystem.getInstance().findFileByIoFile(File(workDirPath, "pom.xml")) ?: return
@@ -64,10 +97,19 @@ class BshMavenRunConfiguration(
             }
             if (prepared.isEmpty()) return  // no inline BeanShell -> proceed as a plain Maven build
 
-            // The instrumenting agent is preferred here for the same reasons as on the `.bsh` path,
-            // and one more that is specific to Maven: it needs no core extension and no rewritten
-            // plugin configuration, so the build Maven runs is byte-for-byte the one in the pom.
-            val agentJar = BshDebugAgentJar.locate()
+            // The agent is preferred here for the same reasons as on the `.bsh` path, and one more
+            // specific to Maven: it needs no core extension and no rewritten plugin configuration, so
+            // the build Maven runs is byte-for-byte the one in the pom.
+            val agentJar = if (mode.prefersAgent) BshDebugAgentJar.locate() else null
+            if (mode == BshInstrumentationMode.AGENT && agentJar == null) {
+                // Thrown, not downgraded: rewriting would produce a session whose frames look right
+                // and which quietly has no call stack, no expandable values and no Evaluate.
+                throw ExecutionException(
+                    "The BeanShell debug agent jar could not be located, so \"${mode.label}\" cannot run. " +
+                        "Set -D${BshDebugAgentJar.PATH_PROPERTY} to point at it, or pick another " +
+                        "instrumentation on the BeanShell tab of this run configuration.",
+                )
+            }
 
             val server = ServerSocket(0)
             try {
@@ -80,8 +122,8 @@ class BshMavenRunConfiguration(
                 val pending = if (agentJar != null) {
                     setUpAgent(settings, props, agentJar, prepared, server)
                 } else {
-                    LOG.info("Agent jar unavailable; debugging the inline script by rewriting it")
-                    setUpRewrite(props, prepared, server) ?: return
+                    val notice = if (mode.toleratesRewriteFallback) BshDebugRunner.REWRITE_FALLBACK_NOTICE else null
+                    setUpRewrite(props, prepared, server, notice) ?: return
                 }
                 settings.setMavenProperties(props)
 
@@ -138,6 +180,7 @@ class BshMavenRunConfiguration(
         props: MutableMap<String, String>,
         prepared: List<BshMavenDebugSupport.Prepared>,
         server: ServerSocket,
+        startupNotice: String?,
     ): BshMavenDebugSupport.Pending? {
         val callbackJar = BshLaunch.debugAgentClasspath() ?: run {
             LOG.warn("BeanShell debug hook not found on the plugin classpath; running without BeanShell debug")
@@ -161,10 +204,13 @@ class BshMavenRunConfiguration(
         props[BshMavenDebugSupport.CALLBACK_JAR_PROPERTY] = callbackJar
         // The rewritten script carries pom.xml lines in its own hook calls, so no mapper is needed;
         // and a rewritten script hands the hook a NameSpace, which cannot evaluate.
-        return BshMavenDebugSupport.Pending(server, prepared.first().pomFile)
+        return BshMavenDebugSupport.Pending(server, prepared.first().pomFile, startupNotice = startupNotice)
     }
 
     private companion object {
         private val LOG = logger<BshMavenRunConfiguration>()
+
+        /** Attribute name in the saved run configuration. */
+        private const val INSTRUMENTATION_ATTRIBUTE = "bshInstrumentation"
     }
 }

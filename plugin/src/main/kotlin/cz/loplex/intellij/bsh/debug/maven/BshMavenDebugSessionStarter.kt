@@ -51,6 +51,7 @@ class BshMavenDebugSessionStarter : ExecutionListener {
                             notifyStartOnInit = false,
                             lineMapper = pending.lineMapper,
                             supportsEvaluation = pending.supportsEvaluation,
+                            startupNotice = pending.startupNotice,
                         )
                 },
             )

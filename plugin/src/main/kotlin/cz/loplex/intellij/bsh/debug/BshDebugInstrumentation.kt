@@ -11,7 +11,13 @@ import java.io.File
  * than implicit.
  */
 enum class BshInstrumentationMode(
-    /** What the run configuration's combo box shows. */
+    /**
+     * What the run configuration's combo box shows.
+     *
+     * Kept short on purpose: a `ComboBox` is laid out to fit its widest item, so a sentence here
+     * widens the whole settings panel. The trade-offs go in the comment under the field, which is
+     * broken into lines by hand — see `BshSettingsEditor`.
+     */
     val label: String,
 ) {
 
@@ -31,7 +37,7 @@ enum class BshInstrumentationMode(
      *  * **Brace-less bodies.** `if (x) foo();` cannot be rewritten without detaching the body,
      *    but the agent reports the body node without moving any text.
      */
-    AGENT("JVM agent — instrument the interpreter, leave the script untouched"),
+    AGENT("JVM agent — instrument the interpreter"),
 
     /**
      * Rewrite the script before launch, prefixing a hook call to every safe statement.
@@ -40,7 +46,7 @@ enum class BshInstrumentationMode(
      * bootstrap classloader. That makes it the fallback when the agent jar cannot be located or
      * when a host JVM refuses an agent.
      */
-    REWRITE("Rewrite the script — no agent jar, no JVM flag"),
+    REWRITE("Rewrite the script — no agent, no JVM flag"),
     ;
 
     companion object {

@@ -1,9 +1,12 @@
 package cz.loplex.bsh.hook;
 
 import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -46,6 +49,25 @@ public final class BshHook {
      * jar on every {@code print()} call.
      */
     public static final String SOURCES_PROPERTY = "bsh.debug.sources";
+
+    /**
+     * Path to a file listing source-file <em>prefixes</em> to report on, one per line; a node is
+     * reported when its {@code getSourceFile()} starts with one of them. Combines with
+     * {@link #SOURCES_PROPERTY} as an OR — either match reports.
+     *
+     * <p>Exists because a script BeanShell was handed as a <em>string</em> has no file name. It gets
+     * a synthetic one instead: {@code Interpreter.eval(String)} names the source
+     * <code>inline evaluation of: ``&lt;the script, newlines flattened, cut at 80 chars&gt;''</code>.
+     * That is the shape an inline Maven {@code <script>} arrives in, and matching it needs a prefix
+     * rather than a suffix — the tail may be the {@code " . . . "} elision, and the script's own text
+     * is in the middle. A prefix short enough to sit inside the 80 chars is also immune to that cut,
+     * to the {@code ;} BeanShell appends, and to any trimming the calling plugin did.
+     *
+     * <p>A file rather than a property value because these strings contain the script's punctuation,
+     * commas included, so no in-property separator is safe. A line, by contrast, cannot occur inside
+     * one: BeanShell already replaced every newline with a space when it built the name.
+     */
+    public static final String SOURCE_PREFIXES_FILE_PROPERTY = "bsh.debug.sources.file";
 
     /**
      * When set, report to stderr instead of the socket. A development aid for checking which
@@ -194,6 +216,7 @@ public final class BshHook {
 
     private static final int port;
     private static final String[] sources;
+    private static final String[] sourcePrefixes;
     private static final boolean trace;
     private static boolean disabled;
     private static Socket socket;
@@ -269,6 +292,8 @@ public final class BshHook {
             }
             sources = split;
         }
+
+        sourcePrefixes = readSourcePrefixes(System.getProperty(SOURCE_PREFIXES_FILE_PROPERTY));
 
         // Tracing to stderr needs no listener, so it is a valid mode on its own.
         disabled = port == -1 && !trace;
@@ -525,20 +550,69 @@ public final class BshHook {
         breakpointsByLine = parsed;
     }
 
-    /** Applies the {@link #SOURCES_PROPERTY} filter; no filter configured means report all. */
+    /**
+     * Applies the {@link #SOURCES_PROPERTY} (suffix) and {@link #SOURCE_PREFIXES_FILE_PROPERTY}
+     * (prefix) filters; neither configured means report all.
+     */
     private static boolean isReportedSource(String sourceFile) {
-        if (sources == null) {
+        if (sources == null && sourcePrefixes == null) {
             return true;
         }
         if (sourceFile == null) {
             return false;
         }
-        for (String candidate : sources) {
-            if (!candidate.isEmpty() && sourceFile.endsWith(candidate)) {
-                return true;
+        if (sources != null) {
+            for (String candidate : sources) {
+                if (!candidate.isEmpty() && sourceFile.endsWith(candidate)) {
+                    return true;
+                }
+            }
+        }
+        if (sourcePrefixes != null) {
+            for (String candidate : sourcePrefixes) {
+                if (!candidate.isEmpty() && sourceFile.startsWith(candidate)) {
+                    return true;
+                }
             }
         }
         return false;
+    }
+
+    /**
+     * Reads the prefix list, or returns null when there is none to read.
+     *
+     * <p>An unreadable file returns null — "report everything" — rather than failing. A filter is an
+     * optimisation over reporting every statement and letting the IDE decide; losing it costs speed,
+     * whereas throwing here would abort somebody's build over a missing temp file.
+     */
+    private static String[] readSourcePrefixes(String path) {
+        if (path == null || path.trim().isEmpty()) {
+            return null;
+        }
+        BufferedReader reader = null;
+        try {
+            reader = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"));
+            List<String> lines = new ArrayList<String>();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.isEmpty()) {
+                    lines.add(line);
+                }
+            }
+            return lines.isEmpty() ? null : lines.toArray(new String[lines.size()]);
+        } catch (IOException ex) {
+            System.err.println("[bsh-agent] cannot read " + SOURCE_PREFIXES_FILE_PROPERTY + "='" + path
+                    + "', reporting every source: " + ex);
+            return null;
+        } finally {
+            if (reader != null) {
+                try {
+                    reader.close();
+                } catch (IOException ignored) {
+                    // Nothing useful to do about a failed close on a file we only read.
+                }
+            }
+        }
     }
 
     private static String shortSource(String sourceFile) {

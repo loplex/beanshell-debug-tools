@@ -85,4 +85,32 @@ print("second");
             )
         }
     }
+
+    /**
+     * Under the instrumenting agent nothing is baked in: BeanShell reports lines relative to the
+     * snippet it was handed, so the pom line has to come from the map built here. The two snippets
+     * must stay apart, which is what the name prefix is for.
+     */
+    fun testAgentLineMapperResolvesEachScriptToItsPomLine() {
+        val file = myFixture.configureByText("pom.xml", twoScriptPom)
+        val document = myFixture.editor.document
+
+        val prepared = ReadAction.compute<List<BshMavenDebugSupport.Prepared>, RuntimeException> {
+            BshMavenDebugSupport.prepare(project, file.virtualFile)
+        }
+        val mapper = BshMavenDebugSupport.lineMapper(prepared)
+
+        for (marker in listOf("first", "second")) {
+            val entry = prepared.first { it.original.contains(marker) }
+            val hostLine = document.getLineNumber(file.text.indexOf("print(\"$marker\");")) + 1
+
+            // The name BeanShell derives for a script it was handed as a string. The plugin trims the
+            // XML text, so the statement is the snippet's line 1 -- the reading agentSources offers
+            // first when the injected text has leading whitespace.
+            val reported = BshMavenDebugSupport.beanShellSourceName(entry.original.trim())
+            assertEquals("\"$marker\" line 1 maps to pom line $hostLine", hostLine, mapper(reported, 1))
+        }
+
+        assertEquals("an unknown source has no line in this file", -1, mapper("print.bsh", 1))
+    }
 }

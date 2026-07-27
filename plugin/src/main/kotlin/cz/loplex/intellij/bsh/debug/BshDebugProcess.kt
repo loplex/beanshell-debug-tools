@@ -70,11 +70,18 @@ class BshDebugProcess(
      */
     private val notifyStartOnInit: Boolean = true,
     /**
-     * Maps a line reported by the agent to a 1-based line in [sourceFile]. Identity for a
-     * standalone `.bsh` file; for an inline script injected into a pom.xml it translates the
-     * snippet-relative line to the host pom.xml line.
+     * Maps a position the agent reported — its own source name and line — to a 1-based line in
+     * [sourceFile], or -1 when that source is not part of [sourceFile] at all.
+     *
+     * Null means the reported lines already *are* [sourceFile] lines: the standalone `.bsh` file,
+     * and the rewriting Maven path, whose injected hook calls carry pom.xml lines baked in.
+     *
+     * The Maven path under the instrumenting agent supplies one: there BeanShell reports lines
+     * relative to the snippet it was handed, under the synthetic name it derives from the script's
+     * own text, so both halves are needed — the name says *which* inline script, the line says
+     * where in it.
      */
-    private val lineMapper: (Int) -> Int = { it },
+    private val lineMapper: ((sourceFile: String, line: Int) -> Int)? = null,
     /**
      * Whether to hand the agent its breakpoint set so it can filter locally instead of reporting
      * every statement and waiting for a verdict.
@@ -325,7 +332,8 @@ class BshDebugProcess(
 
     private fun handleStep(line: Int, depth: Int, frames: List<BshFrameInfo>) {
         currentDepth = depth
-        val sourceLine = lineMapper(line)
+        val reportedSource = frames.firstOrNull()?.sourceFile ?: ""
+        val sourceLine = lineMapper?.invoke(reportedSource, line) ?: line
         val breakpoint = breakpoints[sourceLine]
         val hitRunTo = runToLine == sourceLine
         if (hitRunTo || BshStepLogic.shouldPause(mode, stepDepth, depth, breakpoint != null)) {
@@ -342,15 +350,20 @@ class BshDebugProcess(
     /**
      * Where a frame sits in [sourceFile], or -1 when it sits somewhere else.
      *
-     * The innermost frame is always mapped, which is what keeps the injected-pom path working:
-     * there [lineMapper] translates a snippet line to a pom.xml line, and the agent reports the
-     * snippet's own name for the file. Outer frames are only mapped when they really are in this
-     * file -- a `source()`d script or the frame entered from Java has no position here.
+     * With a [lineMapper] the decision is entirely its own — it knows the reported source names and
+     * answers -1 for anything foreign, so the injected-pom case needs no name matching here.
+     *
+     * Without one, the innermost frame is taken on trust (the agent's own source filter, or a
+     * rewritten script, already guarantees it is ours) while outer frames must be shown to be in
+     * this file: a `source()`d script or a frame entered from Java has no position in it.
      */
-    private fun frameLine(frame: BshFrameInfo): Int = when {
-        frame.id == 0 -> lineMapper(frame.line)
-        frame.line >= 1 && inSourceFile(frame.sourceFile) -> lineMapper(frame.line)
-        else -> -1
+    private fun frameLine(frame: BshFrameInfo): Int {
+        lineMapper?.let { return it(frame.sourceFile, frame.line) }
+        return when {
+            frame.id == 0 -> frame.line
+            frame.line >= 1 && inSourceFile(frame.sourceFile) -> frame.line
+            else -> -1
+        }
     }
 
     private fun inSourceFile(reported: String): Boolean =

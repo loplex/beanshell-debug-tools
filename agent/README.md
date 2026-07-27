@@ -191,9 +191,43 @@ agent jar ships inside the plugin, so both ends are always the same build.
 
 Two consequences to keep in mind. The **first statement is always reported**,
 because the agent opens the connection on its first report and cannot know the
-breakpoints sooner. And filtering is only enabled where the line mapping is the
-identity (the standalone `.bsh` path): breakpoints must be expressed in the lines
-the agent reports, and the injected-pom mapper has no inverse.
+breakpoints sooner. And breakpoint filtering (`SET_BREAKPOINTS`) is only enabled
+where the line mapping is the identity (the standalone `.bsh` path): breakpoints
+must be expressed in the lines the agent reports, and the pom mapper has no
+inverse. The injected-pom path instead reports every statement of its own script
+and lets the IDE decide — correct, and no slower than it sounds, since an inline
+`<script>` is a handful of lines.
+
+### Which sources to report on
+
+Instrumenting the interpreter reaches strictly more code than rewriting one script
+does, so a filter is not optional: BeanShell's own commands (`print`, `pwd`, …) are
+`.bsh` files on the classpath, and without a filter the session stops inside
+`print.bsh` on every `print()` call. Two properties, ORed:
+
+| property | match | for |
+|---|---|---|
+| `bsh.debug.sources` | comma-separated, `endsWith` | a script that has a file name |
+| `bsh.debug.sources.file` | a file of prefixes, one per line, `startsWith` | a script handed over as a **string** |
+
+The second exists because a string has no file name. BeanShell invents one:
+`Interpreter.eval(String)` names the source
+
+```
+inline evaluation of: ``<the script, newlines flattened, cut at 80 chars + " . . . ">''
+```
+
+after appending a `;` if the script lacked one. That is the shape an inline Maven
+`<script>` arrives in, and it has to be matched by a **prefix** — the tail may be
+the elision, and the script's own text sits in the middle. A prefix short enough to
+stay inside the 80 characters is therefore immune to the cut, to the appended `;`
+and to any trimming the calling plugin did. A *file* rather than a property value
+because these strings contain the script's own punctuation, commas included; a
+newline, by contrast, cannot occur inside one — BeanShell already replaced every
+newline with a space when it built the name.
+
+`BshMavenDebugSupport.beanShellSourceName` reproduces the whole rule, which is what
+pins the prefix down as correct.
 
 ### The frame positions are not where you would first look
 

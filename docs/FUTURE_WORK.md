@@ -39,17 +39,34 @@ Maven build rather than a test.
 decided — whether a breakpoint stops the thread that hit it or all of them — which
 both JDWP and DAP make a per-breakpoint choice, so it is UI as well as plumbing.
 
-Note the ordering constraint if DAP is also on the table: [LSP4IJ] does not
-implement the `Thread` event, so a DAP transport would not carry this anyway.
+**Does DAP have to come first?** No — and the earlier note here overstated it. The
+work splits cleanly:
+
+- The **hook** work (a reader thread, per-thread state, per-thread mailboxes) is
+  transport-independent. It is the expensive part, and DAP would not change a line of
+  it. A DAP-speaking agent needs it just as much.
+- Only the **presentation** is written twice, and only if the plugin later moves onto
+  a DAP client: `XSuspendContext.getExecutionStacks()` today, a `Thread` event when
+  LSP4IJ grows one. That is the small half.
+
+So threads can be done for IntelliJ now, and are worth doing on their own terms. What
+does *not* work is the reverse order — routing IntelliJ through DAP first would lose
+threads on the way, since [LSP4IJ] does not implement the `Thread` event.
 
 ---
 
-## Filter BeanShell's own fields out of a scripted class instance
+## `_bshThis…` on a scripted instance — decided: keep it
 
 Expanding an instance of a class declared in a script shows a `_bshThis…` field
-holding a `bsh.XThis` — BeanShell's back-reference to the object's namespace. It is
-a genuine field rather than a synthetic one, so `isSynthetic()` does not catch it and
-the only handle on it is the name. Cosmetic, but it is on every scripted object.
+holding a `bsh.XThis` — BeanShell's back-reference to the object's namespace. It was
+listed here as noise to filter out. **It stays**: it is the object's namespace, which
+is the one place the script's own view of the instance is visible, and a debugger for
+a scripting language is exactly where that belongs. Nothing to do, recorded so it is
+not "tidied away" later.
+
+Where the same reasoning argues for *more*: anywhere the UI can show what BeanShell
+knows and Java reflection does not — a closure's captured namespace, the interpreter's
+own `global` namespace, a `This` returned to Java by a script.
 
 ## DAP as the transport
 

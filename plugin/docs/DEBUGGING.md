@@ -26,8 +26,31 @@ The setting is stored by enum **name** rather than ordinal, so reordering
 `BshInstrumentationMode` cannot silently repoint saved configurations at the other
 mechanism, and an unrecognised value falls back to the default rather than refusing
 to launch. Choosing `AGENT` with no agent jar available also falls back to rewriting:
-the user asked to debug, and a degraded session beats none. The Maven inline-script
-path always rewrites — there is no run configuration of its own to ask.
+the user asked to debug, and a degraded session beats none.
+
+The **Maven inline-script path uses the agent too**, and falls back to rewriting the
+same way. It has no setting of its own — `BshMavenRunConfiguration` inherits Maven's
+settings UI, and adding a tab to it to express a preference the `.bsh` path already
+defaults correctly would be UI for its own sake. Two things had to be built for the
+agent to reach it, both because BeanShell there is handed a **string** rather than a
+file:
+
+- **Which script.** A string has no file name, so BeanShell invents one from the
+  script's own text. `BshMavenDebugSupport.beanShellSourceName` reproduces that rule
+  exactly; production code matches a 60-character prefix of it, which is independent
+  of BeanShell's 80-character elision and of the `;` it appends.
+- **Which line.** The agent reports lines relative to the snippet, not to the pom, so
+  `Prepared.agentSources` carries a snippet-line → pom-line map. Two readings are
+  offered per script, with and without the leading whitespace trimmed, because whether
+  the calling plugin trimmed the XML text shifts both the name and every line —
+  maven-enforcer does, and rather than keep a table of which plugin does what, the
+  reading whose name the agent actually reports wins.
+
+Nothing is injected into the pom on this path: no core extension, no rewritten plugin
+configuration, no `system`-scoped callback dependency. The build Maven runs is the one
+in the pom, with `-javaagent` on its JVM. The agent reaches BeanShell inside a Maven
+plugin realm because its hook sits on the **bootstrap** classpath — the case that
+requirement was designed for in the first place.
 
 The agent is preferred because rewriting is visible to the user: the injected call
 becomes a real statement, so it shows up in `getInvocationText()` and therefore in

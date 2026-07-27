@@ -149,30 +149,31 @@ different digits.
 
 ## 3. Protocol
 
-Version 2. Both directions are opcode-tagged. **The full specification is
+Version 3. Both directions are opcode-tagged, everything is addressed to a thread, and
+a reply carries the id of the request it answers. **The full specification is
 [`docs/PROTOCOL.md`](../docs/PROTOCOL.md)** — framing, every field, the invariants and the
 failure modes. What follows is the summary, plus the parts whose *reasons* belong with the
 agent.
 
 ```
 agent -> IDE
-  0x10 STOPPED    int line, int callDepth, int frameCount,
+  0x10 STOPPED    int threadId, utf threadName, int line, int callDepth, int frameCount,
                   (utf name, utf sourceFile, int line)*     innermost frame first
-  0x11 SCOPES     int count, (utf name, int handle)*        answers 0x04
-  0x12 VARIABLES  int count,
-                  (utf name, utf value, utf type, int childHandle)*   answers 0x05
-  0x13 EVALUATED     byte ok, utf value, utf type, int childHandle    answers 0x06
-  0x14 VARIABLE_SET  byte ok, utf value, utf type, int childHandle    answers 0x07
+  0x11 SCOPES     int requestId, int count, (utf name, int handle)*     answers 0x04
+  0x12 VARIABLES  int requestId, int count,
+                  (utf name, utf value, utf type, int childHandle)*     answers 0x05
+  0x13 EVALUATED     int requestId, byte ok, utf value, utf type, int childHandle
+  0x14 VARIABLE_SET  int requestId, byte ok, utf value, utf type, int childHandle
 
 IDE -> agent
-  0x01 RESUME
-  0x02 SET_BREAKPOINTS  int count, (utf file, int line)*
-  0x03 SET_RUN_MODE     byte mode                           0 = running
-  0x04 SCOPES           int frameId                         only while suspended
-  0x05 VARIABLES        int handle                          only while suspended
-  0x06 EVALUATE         int frameId, utf expression         only while suspended
-  0x07 SET_VARIABLE     int frameId, int handle,
-                        utf name, utf expression            only while suspended
+  0x01 RESUME           int threadId
+  0x02 SET_BREAKPOINTS  int count, (utf file, int line)*    shared by every thread
+  0x03 SET_RUN_MODE     int threadId, byte mode             0 = running
+  0x04 SCOPES           int threadId, int requestId, int frameId
+  0x05 VARIABLES        int threadId, int requestId, int handle
+  0x06 EVALUATE         int threadId, int requestId, int frameId, utf expression
+  0x07 SET_VARIABLE     int threadId, int requestId, int frameId, int handle,
+                        utf name, utf expression
 ```
 
 **Variables are pulled, not pushed.** Each expandable value carries an opaque
@@ -183,11 +184,12 @@ solve, no cleanup protocol to get wrong. That is
 [DAP's `variablesReference`](https://microsoft.github.io/debug-adapter-protocol/specification#Types_Variable)
 in a smaller encoding: adopting DAP later changes the serialisation, not the design.
 
-Requests are served **on the interpreter thread**, from inside the same loop that
-waits for `RESUME`. Not a shortcut: that thread is parked there anyway, it owns
-the BeanShell state being inspected, and answering from anywhere else would need a
-lock BeanShell does not offer. It also means a reply is always the next thing on
-the wire, so neither end needs request ids.
+Requests are served **on the thread they concern**, from inside the same loop where it
+waits for `RESUME`. Not a shortcut: that thread is parked there anyway, it owns the
+BeanShell state being inspected, and answering from anywhere else would need a lock
+BeanShell does not offer. A dedicated daemon **reader thread** only routes each command
+into that thread's mailbox — which is what makes two simultaneous stops possible at all,
+since a suspended thread can no longer be the socket reader.
 
 There is no version negotiation, because there is nothing to negotiate with: the
 agent jar ships inside the plugin, so both ends are always the same build.

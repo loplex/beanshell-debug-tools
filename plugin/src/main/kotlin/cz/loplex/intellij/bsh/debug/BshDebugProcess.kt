@@ -21,6 +21,7 @@ import java.net.Socket
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * How long a scopes or variables request waits before giving up.
@@ -112,28 +113,51 @@ class BshDebugProcess(
     private val breakpoints = ConcurrentHashMap<Int, XLineBreakpoint<*>>()
     private val handler = BshBreakpointHandler()
 
-    @Volatile private var mode = BshStepMode.RUN
-    @Volatile private var stepDepth = 0
-    @Volatile private var currentDepth = 0
+    /**
+     * Everything that used to be one scalar for the whole session, now per script thread.
+     *
+     * Stepping is the reason: `mode` and `stepDepth` decide whether the *next* statement pauses, and
+     * with one copy between them a Step Over on one thread would change where another stops. The
+     * frames are kept too, so a thread suspended while the user looks at a different one can still
+     * populate the Threads combo without being resumed first.
+     */
+    private class ThreadSession(val id: Int, val name: String) {
+        @Volatile var mode = BshStepMode.RUN
+        @Volatile var stepDepth = 0
+        @Volatile var currentDepth = 0
+        @Volatile var frames: List<BshFrameInfo> = emptyList()
+        @Volatile var suspended = false
+        /** One-shot "Run to Cursor" target, in [sourceFile] lines (1-based); null when inactive. */
+        @Volatile var runToLine: Int? = null
+    }
+
+    private val threads = ConcurrentHashMap<Int, ThreadSession>()
+
+    /**
+     * The thread the user's last action applied to.
+     *
+     * Resume and the step commands arrive from the platform with an `XSuspendContext`, whose active
+     * execution stack says which thread is selected -- but the platform may also pass null, so the
+     * thread that reported the stop being looked at is remembered as the fallback.
+     */
+    @Volatile private var lastStoppedThread: Int = 0
+
     @Volatile private var stopped = false
-    /** One-shot "Run to Cursor" target, in [sourceFile] line coordinates (1-based); null when inactive. */
-    @Volatile private var runToLine: Int? = null
     private var socket: Socket? = null
     private var output: OutputStream? = null
     private var commands: DataOutputStream? = null
 
     /**
-     * Hands a reply from the reader thread to whichever thread asked for it.
+     * Replies waiting to be collected, keyed by the request id they answer.
      *
-     * Capacity one, guarded by [requestLock], because only one request is ever in flight: the
-     * agent answers from inside the loop where it waits to be resumed, so replies arrive in the
-     * order the requests were sent and nothing else can appear between them.
+     * Protocol 2 needed none of this: a reply was always the next thing on the wire, so one
+     * capacity-one queue and a lock sufficed. That stops holding once two threads can be suspended —
+     * thread B may report a stop, or have its own request answered, between A's request and A's
+     * answer. Correlating by id also retires the old hazard for good: a timed-out request no longer
+     * poisons the channel, because its late reply can only match an id nobody is waiting on.
      */
-    private val responses = ArrayBlockingQueue<Any>(1)
-    private val requestLock = Any()
-
-    /** Set once a request went unanswered, after which no reply can be placed. See [exchange]. */
-    @Volatile private var desynced = false
+    private val pending = ConcurrentHashMap<Int, ArrayBlockingQueue<Any>>()
+    private val nextRequestId = AtomicInteger(1)
 
     override fun createConsole(): ExecutionConsole {
         val console = TextConsoleBuilderFactory.getInstance().createBuilder(session.project).console
@@ -162,15 +186,28 @@ class BshDebugProcess(
         startupNotice?.let { processHandler.notifyTextAvailable("$it\n", ProcessOutputTypes.SYSTEM) }
     }
 
-    override fun resume(context: XSuspendContext?) = proceed(BshStepMode.RUN)
-    override fun startStepInto(context: XSuspendContext?) = proceed(BshStepMode.INTO)
-    override fun startStepOver(context: XSuspendContext?) = proceed(BshStepMode.OVER)
-    override fun startStepOut(context: XSuspendContext?) = proceed(BshStepMode.OUT)
+    override fun resume(context: XSuspendContext?) = proceed(context, BshStepMode.RUN)
+    override fun startStepInto(context: XSuspendContext?) = proceed(context, BshStepMode.INTO)
+    override fun startStepOver(context: XSuspendContext?) = proceed(context, BshStepMode.OVER)
+    override fun startStepOut(context: XSuspendContext?) = proceed(context, BshStepMode.OUT)
 
     override fun runToPosition(position: XSourcePosition, context: XSuspendContext?) {
         // A one-shot line target: run freely until the agent reports that line in this script.
-        runToLine = if (position.file == sourceFile) position.line + 1 else null
-        proceed(BshStepMode.RUN)
+        val session = sessionOf(context) ?: return
+        session.runToLine = if (position.file == sourceFile) position.line + 1 else null
+        proceed(context, BshStepMode.RUN)
+    }
+
+    /**
+     * Which thread a platform action applies to.
+     *
+     * The suspend context names it, since the user picks a thread in the Threads combo. A null
+     * context (the platform does allow it) falls back to whichever thread reported the stop being
+     * looked at, which is the same thread in every single-threaded session.
+     */
+    private fun sessionOf(context: XSuspendContext?): ThreadSession? {
+        val fromContext = (context?.activeExecutionStack as? BshThreadStack)?.threadId
+        return threads[fromContext ?: lastStoppedThread]
     }
 
     override fun stop() {
@@ -179,17 +216,22 @@ class BshDebugProcess(
         runCatching { server.close() }
     }
 
-    private fun proceed(newMode: BshStepMode) {
-        mode = newMode
-        stepDepth = currentDepth
+    private fun proceed(context: XSuspendContext?, newMode: BshStepMode) {
+        val session = sessionOf(context) ?: return
+        session.mode = newMode
+        session.stepDepth = session.currentDepth
         // Tell the agent what to filter before letting it go, so it applies from the very next
         // statement rather than one stop late.
-        pushFilter()
-        releaseAgent()
+        pushFilter(session)
+        releaseAgent(session.id)
     }
 
-    private fun releaseAgent() {
-        writeToAgent { it.writeByte(CMD_RESUME) }
+    private fun releaseAgent(threadId: Int) {
+        threads[threadId]?.suspended = false
+        writeToAgent {
+            it.writeByte(CMD_RESUME)
+            it.writeInt(threadId)
+        }
     }
 
     /**
@@ -200,20 +242,26 @@ class BshDebugProcess(
      * breakpoint -- without that it would never be reached, since a filtering agent would not
      * report the line.
      */
-    private fun pushFilter() {
+    private fun pushFilter(session: ThreadSession?) {
         if (!pushFilterToAgent) return
         val lines = breakpoints.keys.toMutableSet()
-        runToLine?.let { lines.add(it) }
+        session?.runToLine?.let { lines.add(it) }
         val path = sourceFile.path
         writeToAgent { out ->
+            // Breakpoints are shared by every thread, so they carry no thread id; the run mode is
+            // per thread, because stepping one thread must not make the others report every
+            // statement as well.
             out.writeByte(CMD_SET_BREAKPOINTS)
             out.writeInt(lines.size)
             for (line in lines) {
                 out.writeUTF(path)
                 out.writeInt(line)
             }
-            out.writeByte(CMD_SET_RUN_MODE)
-            out.writeByte(if (mode == BshStepMode.RUN) MODE_RUN else MODE_STEPPING)
+            if (session != null) {
+                out.writeByte(CMD_SET_RUN_MODE)
+                out.writeInt(session.id)
+                out.writeByte(if (session.mode == BshStepMode.RUN) MODE_RUN else MODE_STEPPING)
+            }
         }
     }
 
@@ -239,14 +287,16 @@ class BshDebugProcess(
             // The agent reports everything until it is told otherwise, so push the initial set as
             // soon as the connection exists. The very first statement still arrives unfiltered:
             // the agent opens the connection on its first report and cannot know sooner.
-            pushFilter()
+            pushFilter(null)
             val input = DataInputStream(accepted.getInputStream())
             while (!stopped) {
                 when (input.readByte().toInt() and 0xFF) {
                     EVT_STOPPED -> readStopped(input)
-                    EVT_SCOPES -> responses.offer(readScopesReply(input))
-                    EVT_VARIABLES -> responses.offer(readVariablesReply(input))
-                    EVT_EVALUATED, EVT_VARIABLE_SET -> responses.offer(readEvalReply(input))
+                    // Every reply leads with the id of the request it answers, so it can be handed to
+                    // whoever is waiting for that one rather than to whoever asked most recently.
+                    EVT_SCOPES -> deliver(input.readInt(), readScopesReply(input))
+                    EVT_VARIABLES -> deliver(input.readInt(), readVariablesReply(input))
+                    EVT_EVALUATED, EVT_VARIABLE_SET -> deliver(input.readInt(), readEvalReply(input))
                     // An opcode we do not know means the stream is no longer framed the way we
                     // think it is, and every later read would be garbage. Stop rather than guess.
                     else -> return
@@ -258,12 +308,26 @@ class BshDebugProcess(
     }
 
     private fun readStopped(input: DataInputStream) {
+        val threadId = input.readInt()
+        val threadName = input.readUTF()
         val line = input.readInt()
         val depth = input.readInt()
         val frames = (0 until input.readInt()).map { index ->
             BshFrameInfo(index, input.readUTF(), input.readUTF(), input.readInt())
         }
-        handleStep(line, depth, frames)
+        val session = threads.computeIfAbsent(threadId) { ThreadSession(threadId, threadName) }
+        handleStep(session, line, depth, frames)
+    }
+
+    /**
+     * Hands a reply to the request that is waiting for it, or drops it.
+     *
+     * A reply with nobody waiting is normal rather than an error: the request timed out and gave up.
+     * Dropping it here is exactly what protocol 2 could not do — without ids, that late reply would
+     * have been collected by the next request as its own answer.
+     */
+    private fun deliver(requestId: Int, reply: Any) {
+        pending.remove(requestId)?.offer(reply)
     }
 
     private fun readScopesReply(input: DataInputStream): ScopesReply =
@@ -282,82 +346,118 @@ class BshDebugProcess(
     private class ScopesReply(val scopes: List<Pair<String, Int>>)
     private class VariablesReply(val variables: List<BshVariable>)
 
-    override fun scopes(frameId: Int): List<Pair<String, Int>> = (
-        exchange({ it.writeByte(CMD_SCOPES); it.writeInt(frameId) }, REQUEST_TIMEOUT_MS) as? ScopesReply
+    override fun scopes(threadId: Int, frameId: Int): List<Pair<String, Int>> = (
+        exchange(REQUEST_TIMEOUT_MS) { out, requestId ->
+            out.writeByte(CMD_SCOPES)
+            out.writeInt(threadId)
+            out.writeInt(requestId)
+            out.writeInt(frameId)
+        } as? ScopesReply
         )?.scopes.orEmpty()
 
-    override fun variables(handle: Int): List<BshVariable> = (
-        exchange({ it.writeByte(CMD_VARIABLES); it.writeInt(handle) }, REQUEST_TIMEOUT_MS) as? VariablesReply
+    override fun variables(threadId: Int, handle: Int): List<BshVariable> = (
+        exchange(REQUEST_TIMEOUT_MS) { out, requestId ->
+            out.writeByte(CMD_VARIABLES)
+            out.writeInt(threadId)
+            out.writeInt(requestId)
+            out.writeInt(handle)
+        } as? VariablesReply
         )?.variables.orEmpty()
 
-    override fun evaluate(frameId: Int, expression: String): BshEvalResult? = exchange(
-        {
-            it.writeByte(CMD_EVALUATE)
-            it.writeInt(frameId)
-            it.writeUTF(expression)
-        },
-        EVAL_TIMEOUT_MS,
-    ) as? BshEvalResult
+    override fun evaluate(threadId: Int, frameId: Int, expression: String): BshEvalResult? =
+        exchange(EVAL_TIMEOUT_MS) { out, requestId ->
+            out.writeByte(CMD_EVALUATE)
+            out.writeInt(threadId)
+            out.writeInt(requestId)
+            out.writeInt(frameId)
+            out.writeUTF(expression)
+        } as? BshEvalResult
 
     override fun setVariable(
+        threadId: Int,
         frameId: Int,
         containerHandle: Int,
         name: String,
         expression: String,
-    ): BshEvalResult? = exchange(
-        {
-            it.writeByte(CMD_SET_VARIABLE)
-            it.writeInt(frameId)
-            it.writeInt(containerHandle)
-            it.writeUTF(name)
-            it.writeUTF(expression)
-        },
-        EVAL_TIMEOUT_MS,
-    ) as? BshEvalResult
+    ): BshEvalResult? = exchange(EVAL_TIMEOUT_MS) { out, requestId ->
+        out.writeByte(CMD_SET_VARIABLE)
+        out.writeInt(threadId)
+        out.writeInt(requestId)
+        out.writeInt(frameId)
+        out.writeInt(containerHandle)
+        out.writeUTF(name)
+        out.writeUTF(expression)
+    } as? BshEvalResult
 
     /**
-     * Sends one request and waits for its reply. Serialised: one request is in flight at a time.
+     * Sends one request and waits for the reply that carries its id.
      *
-     * Replies are matched by arrival order and carry no request id, which is sound only as long as
-     * every request is answered. A timeout breaks that: the agent may still be working, and its
-     * reply would then arrive while a later request is waiting and be handed over as that request's
-     * answer. So a timeout retires the request channel for good — later calls fail fast rather than
-     * risk returning the right-looking answer to the wrong question. Correlating replies is the
-     * general fix and it belongs with threads, which need it anyway.
+     * No longer serialised, and that is the point: two threads may be suspended, so the variables
+     * panel for one and a watch expression on another can legitimately be in flight at the same time.
+     * Each caller registers a queue under its own request id, and [deliver] wakes exactly that one.
+     *
+     * A timeout is now merely a lost answer. It used to be worse — replies were matched by arrival
+     * order, so a late one would have been handed to the *next* request as its own, which is why the
+     * channel had to be written off permanently. With ids, the late reply finds no waiter and is
+     * dropped.
      */
-    private fun exchange(write: (DataOutputStream) -> Unit, timeoutMs: Long): Any? = synchronized(requestLock) {
-        if (desynced) return null
-        responses.clear()
+    private fun exchange(timeoutMs: Long, write: (DataOutputStream, Int) -> Unit): Any? {
         val out = commands ?: return null
+        val requestId = nextRequestId.getAndIncrement()
+        val waiter = ArrayBlockingQueue<Any>(1)
+        pending[requestId] = waiter
         try {
             synchronized(out) {
-                write(out)
+                write(out, requestId)
                 out.flush()
             }
         } catch (_: Exception) {
+            pending.remove(requestId)
             return null
         }
-        val reply = responses.poll(timeoutMs, TimeUnit.MILLISECONDS)
-        if (reply == null) desynced = true
+        val reply = waiter.poll(timeoutMs, TimeUnit.MILLISECONDS)
+        if (reply == null) pending.remove(requestId)
         return reply
     }
 
-    private fun handleStep(line: Int, depth: Int, frames: List<BshFrameInfo>) {
-        currentDepth = depth
+    private fun handleStep(thread: ThreadSession, line: Int, depth: Int, frames: List<BshFrameInfo>) {
+        thread.currentDepth = depth
         val reportedSource = frames.firstOrNull()?.sourceFile ?: ""
         val sourceLine = lineMapper?.invoke(reportedSource, line) ?: line
         val breakpoint = breakpoints[sourceLine]
-        val hitRunTo = runToLine == sourceLine
-        if (hitRunTo || BshStepLogic.shouldPause(mode, stepDepth, depth, breakpoint != null)) {
-            mode = BshStepMode.RUN
-            runToLine = null
-            val context = BshSuspendContext(frames, sourceFile, ::frameLine, this)
+        val hitRunTo = thread.runToLine == sourceLine
+        if (hitRunTo || BshStepLogic.shouldPause(thread.mode, thread.stepDepth, depth, breakpoint != null)) {
+            thread.mode = BshStepMode.RUN
+            thread.runToLine = null
+            thread.frames = frames
+            thread.suspended = true
+            lastStoppedThread = thread.id
+            val context = suspendContext(thread)
             if (breakpoint != null) session.breakpointReached(breakpoint, null, context)
             else session.positionReached(context)
         } else {
-            releaseAgent()
+            releaseAgent(thread.id)
         }
     }
+
+    /**
+     * The context for a stop: the thread that reported it, plus every other thread still suspended.
+     *
+     * Listing the others is what puts them in the Threads combo. They are genuinely inspectable while
+     * listed — the agent parks each thread on its own mailbox and keeps answering questions about it,
+     * so selecting one does not require resuming this one first.
+     */
+    private fun suspendContext(active: ThreadSession): BshSuspendContext {
+        val stacks = threads.values
+            .filter { it.suspended }
+            .sortedBy { it.id }
+            .map { stackFor(it) }
+        val activeStack = stacks.firstOrNull { it.threadId == active.id } ?: stackFor(active)
+        return BshSuspendContext(activeStack, stacks.ifEmpty { listOf(activeStack) })
+    }
+
+    private fun stackFor(thread: ThreadSession): BshThreadStack =
+        BshThreadStack(thread.id, thread.name, thread.frames, sourceFile, ::frameLine, this)
 
     /**
      * Where a frame sits in [sourceFile], or -1 when it sits somewhere else.
@@ -387,15 +487,16 @@ class BshDebugProcess(
         override fun registerBreakpoint(breakpoint: XLineBreakpoint<XBreakpointProperties<*>>) {
             if (!matchesScript(breakpoint)) return
             breakpoints[breakpoint.line + 1] = breakpoint
-            // Picked up mid-run: the agent drains pending commands at each statement, so a
-            // breakpoint added while the script runs takes effect without a stop.
-            pushFilter()
+            // Picked up mid-run: each thread drains its mailbox at every statement it does not
+            // report, so a breakpoint added while the script runs takes effect without a stop.
+            // Null session: the breakpoint set is shared, and no thread's run mode is being changed.
+            pushFilter(null)
         }
 
         override fun unregisterBreakpoint(breakpoint: XLineBreakpoint<XBreakpointProperties<*>>, temporary: Boolean) {
             if (!matchesScript(breakpoint)) return
             breakpoints.remove(breakpoint.line + 1)
-            pushFilter()
+            pushFilter(null)
         }
 
         private fun matchesScript(breakpoint: XLineBreakpoint<*>): Boolean =

@@ -1,7 +1,7 @@
 package cz.loplex.intellij.bsh.debug
 
 /*
- * The debug wire protocol, version 2. The full specification -- framing, every field, the
+ * The debug wire protocol, version 3. The full specification -- framing, every field, the
  * invariants and the failure modes -- is `docs/PROTOCOL.md`; this file is the IDE end's copy of the
  * opcodes plus the notes that matter when reading the code around them.
  *

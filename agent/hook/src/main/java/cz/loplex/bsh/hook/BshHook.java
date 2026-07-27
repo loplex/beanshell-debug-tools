@@ -18,6 +18,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Called from every instrumented BeanShell AST evaluation.
@@ -28,11 +32,13 @@ import java.util.Set;
  * BeanShell type (the bootstrap loader cannot see them), hence {@code Object} parameters and
  * reflection throughout. Configuration arrives through system properties for the same reason.
  *
- * <p>The wire format is protocol 2, opcode-tagged in both directions and documented in
- * {@code agent/README.md}. Per reported statement the hook writes {@link #EVT_STOPPED} with the
- * call stack and then blocks, answering whatever the IDE asks about the suspended frames —
- * scopes, variables, an expression to evaluate, a value to change — until it is resumed. Failure
- * handling is described on {@link #onEval}.
+ * <p>The wire format is protocol 3, specified in {@code docs/PROTOCOL.md}. Per reported statement
+ * the hook writes {@link #EVT_STOPPED} with the call stack and then blocks <b>that thread</b>,
+ * answering whatever the IDE asks about its suspended frames — scopes, variables, an expression to
+ * evaluate, a value to change — until it is resumed. Other script threads keep running and may
+ * report alongside; see {@link ThreadState} and {@link #readerLoop} for how that works, and
+ * {@link #report} for why only the reporting thread suspends. Failure handling is described on
+ * {@link #onEval}.
  */
 public final class BshHook {
 
@@ -197,11 +203,75 @@ public final class BshHook {
     private static Map<Integer, List<String>> breakpointsByLine;
 
     /**
-     * Anything other than {@link #MODE_RUN} means the user is stepping, so every statement is
-     * reported and the IDE decides. Stepping is interactive and a round-trip there is invisible;
-     * running is what needed fixing.
+     * Everything about one script thread that used to be a static field.
+     *
+     * <p>Per thread because two script threads can be suspended at once, and each needs its own
+     * frames, its own handle table, its own run mode and its own queue of commands to apply. Sharing
+     * any of them would mean one thread's Step Over changing where the other stops, or a handle
+     * issued to one being expanded against the other's namespace.
+     *
+     * <p>The {@link #mailbox} is what replaces "the suspended thread reads its own commands off the
+     * socket" — see {@link #readerLoop}. Only ever touched by the reader thread (offer) and by its
+     * own thread (take), so it needs no further locking.
      */
-    private static int runMode = MODE_RUN;
+    private static final class ThreadState {
+
+        /** Protocol id, ours rather than {@code Thread.getId()} — see {@link #stateFor}. */
+        final int id;
+        final String name;
+
+        /** Commands the reader thread has handed to this thread, in arrival order. */
+        final BlockingQueue<Object[]> mailbox = new LinkedBlockingQueue<Object[]>();
+
+        /** Objects the IDE may expand, valid only for this thread's current stop. */
+        final Map<Integer, Object> handles = new HashMap<Integer, Object>();
+
+        /** The frames of this thread's current stop, innermost first. Empty while running. */
+        Object[] frames = new Object[0];
+
+        /**
+         * The {@code bsh.Interpreter} of this thread's current stop, or null while running.
+         *
+         * <p>Held only for the duration of a stop: it is what makes evaluating an expression
+         * possible, and holding it longer would pin an interpreter the script has finished with.
+         */
+        Object interpreter;
+
+        /**
+         * Anything other than {@link #MODE_RUN} means the user is stepping <em>this</em> thread, so
+         * every statement on it is reported and the IDE decides. Stepping is interactive and a
+         * round-trip there is invisible; running is what needed filtering.
+         */
+        int runMode = MODE_RUN;
+
+        ThreadState(int id, String name) {
+            this.id = id;
+            this.name = name;
+        }
+    }
+
+    /** Live thread states by protocol id, for the reader thread to dispatch into. */
+    private static final Map<Integer, ThreadState> threadsById =
+            new ConcurrentHashMap<Integer, ThreadState>();
+
+    /**
+     * This thread's state, created on first use.
+     *
+     * <p>A {@code ThreadLocal} rather than a lookup by {@code Thread.currentThread()} because
+     * {@link #onEval} consults it on every instrumented node — the hottest path in the agent.
+     */
+    private static final ThreadLocal<ThreadState> STATE = new ThreadLocal<ThreadState>();
+
+    private static final AtomicInteger nextThreadId = new AtomicInteger(1);
+
+    /**
+     * Handle ids are allocated globally even though the tables are per thread.
+     *
+     * <p>Costs nothing and removes a whole class of confusion: a handle can only ever mean one
+     * object, so a request that named the wrong thread fails to find it rather than silently
+     * expanding a different thread's value that happened to share a number.
+     */
+    private static final AtomicInteger nextHandle = new AtomicInteger(1);
 
     /**
      * Guards against re-entering the interpreter. Reading a variable runs BeanShell code, and
@@ -212,7 +282,22 @@ public final class BshHook {
      */
     private static final ThreadLocal<Boolean> REPORTING = new ThreadLocal<Boolean>();
 
-    private static final Object LOCK = new Object();
+    /**
+     * Serialises writes to the socket, and nothing else.
+     *
+     * <p>This is the whole of what used to be {@code LOCK}. Before threads, one lock covered
+     * connecting, writing, and being suspended — which is precisely why two threads could not be
+     * suspended at once: the first held it for the duration of its stop. Now a stop holds no lock at
+     * all; it parks on its own mailbox, and this guards only the moments when bytes are being put on
+     * the wire, so a second thread can report while the first is still suspended.
+     *
+     * <p>A message must be written under a single acquisition, or two threads' fields would
+     * interleave into an unparseable stream.
+     */
+    private static final Object WRITE_LOCK = new Object();
+
+    /** Guards {@link #connect} and the reader-thread start, which must happen exactly once. */
+    private static final Object CONNECT_LOCK = new Object();
 
     private static final int port;
     private static final String[] sources;
@@ -255,21 +340,6 @@ public final class BshHook {
      * solve and no cleanup protocol to get wrong. This mirrors DAP, where a
      * {@code variablesReference} is explicitly invalid once execution continues.
      */
-    private static final Map<Integer, Object> handles = new HashMap<Integer, Object>();
-    private static int nextHandle = 1;
-
-    /** The frames of the current stop, innermost first. Empty while running. */
-    private static Object[] currentFrames = new Object[0];
-
-    /**
-     * The {@code bsh.Interpreter} of the current stop, or null while running.
-     *
-     * <p>Kept only for the duration of a stop, alongside {@link #currentFrames}: it is what makes
-     * evaluating an expression possible, and holding it any longer would pin an interpreter the
-     * script may have finished with.
-     */
-    private static Object currentInterpreter;
-
     static {
         int parsed = -1;
         String portProperty = System.getProperty(PORT_PROPERTY);
@@ -348,13 +418,14 @@ public final class BshHook {
                         + " src=" + shortSource(sourceFile));
                 return;
             }
-            if (!shouldReport(sourceFile, line)) {
+            ThreadState state = stateFor();
+            if (!shouldReport(state, sourceFile, line)) {
                 // Still let the IDE change its mind mid-run, e.g. when the user adds a
                 // breakpoint while the script is running.
-                drainPendingCommands();
+                drainMailbox(state);
                 return;
             }
-            report(line, sourceFile, callstack, interpreter);
+            report(state, line, sourceFile, callstack, interpreter);
         } catch (Throwable t) {
             // Never let a debugging problem change the behaviour of the debugged script.
             disabled = true;
@@ -445,9 +516,9 @@ public final class BshHook {
      * configured any breakpoints — the last case is what keeps an IDE speaking only the original
      * one-byte protocol fully functional.
      */
-    private static boolean shouldReport(String sourceFile, int line) {
+    private static boolean shouldReport(ThreadState state, String sourceFile, int line) {
         Map<Integer, List<String>> configured = breakpointsByLine;
-        if (configured == null || runMode != MODE_RUN) {
+        if (configured == null || state.runMode != MODE_RUN) {
             return true;
         }
         List<String> files = configured.get(Integer.valueOf(line));
@@ -466,73 +537,176 @@ public final class BshHook {
     }
 
     /**
-     * Consumes any commands the IDE has already sent, without waiting for more.
+     * Applies whatever the reader thread has already put in this thread's mailbox, without waiting.
      *
-     * <p>Checking {@code available()} outside the lock is a benign race: losing it only means
-     * entering the lock and finding nothing to read.
+     * <p>Called on a statement that is <em>not</em> being reported, so the IDE can still change its
+     * mind mid-run — adding a breakpoint, or starting to step — without the script having to stop
+     * first.
      */
-    private static void drainPendingCommands() {
-        try {
-            if (socket == null || in.available() <= 0) {
+    private static void drainMailbox(ThreadState state) {
+        Object[] message;
+        while ((message = state.mailbox.poll()) != null) {
+            try {
+                applyCommand(state, message);
+            } catch (IOException ex) {
+                sessionLost(ex);
                 return;
             }
-            synchronized (LOCK) {
-                while (in.available() > 0) {
-                    if (readCommand() == CMD_RESUME) {
-                        // A stray resume with nothing suspended; nothing to release.
-                        return;
-                    }
+        }
+    }
+
+    /**
+     * The one thread that reads the socket, dispatching each command to the thread it names.
+     *
+     * <p>The reason this exists is structural rather than tidiness. Before threads, a suspended
+     * thread read its own commands off the socket — which cannot work once two are suspended, since
+     * only one of them can be the reader. So reading is now somebody else's job, and a suspended
+     * thread parks on {@link ThreadState#mailbox} instead.
+     *
+     * <p>It is a <b>daemon</b> thread, and that is not incidental: it lives in whatever JVM hosts
+     * BeanShell — a Maven build, in the case this whole agent exists for — and a non-daemon thread
+     * blocked on a socket read would keep that JVM alive after the build finished. Wrong lifecycle
+     * here hangs somebody's build rather than a test.
+     *
+     * <p>Requests are still <em>served</em> on the thread that owns the state, from
+     * {@link #applyCommand}. That was never a shortcut: only that thread can safely touch its own
+     * BeanShell state, and answering from here would need a lock BeanShell does not offer.
+     */
+    private static void readerLoop() {
+        try {
+            while (true) {
+                int command = in.readByte() & 0xFF;
+                if (command == CMD_SET_BREAKPOINTS) {
+                    // Breakpoints are the one piece of shared configuration, so they are applied
+                    // here rather than routed to a thread -- there may be no suspended thread to
+                    // route them to, which is exactly when the IDE sends them.
+                    readBreakpoints();
+                    continue;
                 }
+                Object[] message = readMessage(command);
+                if (message == null) {
+                    continue;
+                }
+                int threadId = ((Integer) message[1]).intValue();
+                ThreadState target = threadsById.get(Integer.valueOf(threadId));
+                if (target == null) {
+                    // A command for a thread that has exited. Dropping it is right: the IDE will
+                    // have been told the thread is gone, and there is nobody to answer for it.
+                    continue;
+                }
+                target.mailbox.offer(message);
             }
         } catch (IOException ex) {
-            System.err.println("[bsh-agent] debug session disconnected; continuing without debugging");
+            sessionLost(ex);
+        } catch (Throwable t) {
+            System.err.println("[bsh-agent] reader thread failed; continuing without debugging: " + t);
             disabled = true;
             close();
         }
     }
 
-    /** Blocks until the IDE releases this statement, applying any commands sent first. */
-    private static void readCommandsUntilResume() throws IOException {
-        while (readCommand() != CMD_RESUME) {
-            // keep applying commands
+    /**
+     * Reads one command's payload off the wire into {@code [opcode, threadId, args…]}.
+     *
+     * <p>The reader has to know every opcode's shape even though it interprets none of them: without
+     * length prefixes there is no way to skip a message, so an opcode it could not decode would
+     * desynchronise the stream for good. An unknown opcode therefore reads its thread id and stops
+     * there, which keeps the stream aligned for anything that carries no further fields.
+     */
+    private static Object[] readMessage(int command) throws IOException {
+        int threadId = in.readInt();
+        switch (command) {
+            case CMD_RESUME:
+                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId) };
+            case CMD_SET_RUN_MODE:
+                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId),
+                        Integer.valueOf(in.readByte() & 0xFF) };
+            case CMD_SCOPES:
+            case CMD_VARIABLES:
+                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId),
+                        Integer.valueOf(in.readInt()), Integer.valueOf(in.readInt()) };
+            case CMD_EVALUATE:
+                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId),
+                        Integer.valueOf(in.readInt()), Integer.valueOf(in.readInt()), in.readUTF() };
+            case CMD_SET_VARIABLE:
+                return new Object[] { Integer.valueOf(command), Integer.valueOf(threadId),
+                        Integer.valueOf(in.readInt()), Integer.valueOf(in.readInt()),
+                        Integer.valueOf(in.readInt()), in.readUTF(), in.readUTF() };
+            default:
+                System.err.println("[bsh-agent] ignoring unknown command 0x"
+                        + Integer.toHexString(command));
+                return null;
         }
     }
 
-    /** Reads and applies one command, returning its opcode. Caller holds {@link #LOCK}. */
-    private static int readCommand() throws IOException {
-        int command = in.readByte() & 0xFF;
+    /**
+     * Applies one command on the thread that owns the state, and answers it if it expects an answer.
+     *
+     * <p>Returns true when the command was {@code RESUME}, i.e. when the caller should stop waiting.
+     * An unrecognised command counts as a release: the worst case is a script that keeps running,
+     * whereas ignoring it could leave a thread parked for good.
+     */
+    private static boolean applyCommand(ThreadState state, Object[] message) throws IOException {
+        int command = ((Integer) message[0]).intValue();
         switch (command) {
-            case CMD_SET_BREAKPOINTS:
-                readBreakpoints();
-                break;
             case CMD_SET_RUN_MODE:
-                runMode = in.readByte() & 0xFF;
-                break;
+                state.runMode = ((Integer) message[2]).intValue();
+                return false;
             case CMD_SCOPES:
-                writeScopes(in.readInt());
-                break;
+                writeScopes(state, ((Integer) message[2]).intValue(), ((Integer) message[3]).intValue());
+                return false;
             case CMD_VARIABLES:
-                writeVariables(in.readInt());
-                break;
-            case CMD_EVALUATE: {
-                int frameId = in.readInt();
-                writeEvaluated(EVT_EVALUATED, evaluate(frameId, in.readUTF()));
-                break;
-            }
-            case CMD_SET_VARIABLE: {
-                int frameId = in.readInt();
-                int handle = in.readInt();
-                String name = in.readUTF();
-                writeEvaluated(EVT_VARIABLE_SET, assign(frameId, handle, name, in.readUTF()));
-                break;
-            }
+                writeVariables(state, ((Integer) message[2]).intValue(), ((Integer) message[3]).intValue());
+                return false;
+            case CMD_EVALUATE:
+                writeEvaluated(EVT_EVALUATED, ((Integer) message[2]).intValue(),
+                        evaluate(state, ((Integer) message[3]).intValue(), (String) message[4]));
+                return false;
+            case CMD_SET_VARIABLE:
+                writeEvaluated(EVT_VARIABLE_SET, ((Integer) message[2]).intValue(),
+                        assign(state, ((Integer) message[3]).intValue(), ((Integer) message[4]).intValue(),
+                                (String) message[5], (String) message[6]));
+                return false;
             default:
-                // RESUME, and anything unrecognised, which a future IDE must not be able to
-                // wedge the agent with. Treating it as a release is the safe reading: the worst
-                // case is a script that keeps running.
-                break;
+                return true;
         }
-        return command;
+    }
+
+    /** Blocks on this thread's mailbox until the IDE releases it, applying anything sent first. */
+    private static void awaitResume(ThreadState state) throws IOException {
+        while (true) {
+            Object[] message;
+            try {
+                message = state.mailbox.take();
+            } catch (InterruptedException ex) {
+                // Somebody wants this thread to stop. Restore the flag and let the script continue --
+                // staying parked would be worse than a missed breakpoint.
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (applyCommand(state, message)) {
+                return;
+            }
+            if (disabled) {
+                return;
+            }
+        }
+    }
+
+    /** One place for "the IDE went away", which must never abort the host program. */
+    private static void sessionLost(IOException ex) {
+        if (!disabled) {
+            System.err.println("[bsh-agent] debug session disconnected; continuing without debugging ("
+                    + ex + ")");
+        }
+        disabled = true;
+        close();
+        // Release everyone parked on a mailbox, or a suspended thread would wait for an IDE that is
+        // gone. An empty message array is read as "unrecognised", which applyCommand treats as a
+        // release.
+        for (ThreadState waiting : threadsById.values()) {
+            waiting.mailbox.offer(new Object[] { Integer.valueOf(CMD_RESUME), Integer.valueOf(waiting.id) });
+        }
     }
 
     private static void readBreakpoints() throws IOException {
@@ -626,27 +800,36 @@ public final class BshHook {
         return slash < 0 ? sourceFile : sourceFile.substring(slash + 1);
     }
 
-    private static void report(int line, String sourceFile, Object callstack, Object interpreter)
-            throws Exception {
+    /**
+     * Reports one statement and blocks this thread until the IDE releases it.
+     *
+     * <p><b>Only this thread is suspended.</b> Other script threads keep running, and if one of them
+     * reaches a breakpoint it reports and suspends alongside. That is not a simplification of
+     * JDWP-style "suspend all" — it is what an instrumenting agent can actually do. A thread can only
+     * be stopped where it calls the hook, so there is no way to freeze a thread that is in the middle
+     * of Java code; "suspend all" would really mean "stop the others whenever they next reach a
+     * statement", which is a different thing wearing the same name. Honest scope beats a familiar
+     * label here.
+     */
+    private static void report(ThreadState state, int line, String sourceFile, Object callstack,
+            Object interpreter) throws Exception {
         int depth = (Integer) callStackDepth.invoke(callstack);
         Object[] frames = frames(callstack);
-        synchronized (LOCK) {
-            if (disabled) {
-                return;
-            }
-            if (socket == null) {
-                try {
-                    connect();
-                } catch (IOException ex) {
-                    System.err.println("[bsh-agent] cannot reach the IDE debug server on 127.0.0.1:"
-                            + port + " (" + ex + "); aborting");
-                    System.exit(EXIT_DEBUG_UNAVAILABLE);
-                }
-            }
-            currentFrames = frames;
-            currentInterpreter = interpreter;
-            try {
+        if (disabled) {
+            return;
+        }
+        if (!ensureConnected()) {
+            return;
+        }
+        state.frames = frames;
+        state.interpreter = interpreter;
+        try {
+            // Held only for the write. A stop no longer holds any lock -- which is what lets a second
+            // thread report while this one is still parked below.
+            synchronized (WRITE_LOCK) {
                 out.writeByte(EVT_STOPPED);
+                out.writeInt(state.id);
+                out.writeUTF(state.name);
                 out.writeInt(line);
                 out.writeInt(depth);
                 out.writeInt(frames.length);
@@ -661,17 +844,69 @@ public final class BshHook {
                     out.writeInt(i == 0 ? line : nodeLine(site));
                 }
                 out.flush();
-                readCommandsUntilResume();
-            } catch (IOException ex) {
-                System.err.println("[bsh-agent] debug session disconnected; continuing without debugging");
-                disabled = true;
-                close();
-            } finally {
-                releaseHandles();
-                currentFrames = new Object[0];
-                currentInterpreter = null;
             }
+            awaitResume(state);
+        } catch (IOException ex) {
+            sessionLost(ex);
+        } finally {
+            releaseHandles(state);
+            state.frames = new Object[0];
+            state.interpreter = null;
         }
+    }
+
+    /**
+     * Connects on first use and starts the reader thread, exactly once.
+     *
+     * <p>Returns false when debugging has been given up on, so the caller reports nothing. A
+     * configured port with nothing listening still aborts the process: silently skipping every
+     * breakpoint is the failure that looks like "it just ran".
+     */
+    private static boolean ensureConnected() {
+        if (socket != null) {
+            return true;
+        }
+        synchronized (CONNECT_LOCK) {
+            if (disabled) {
+                return false;
+            }
+            if (socket != null) {
+                return true;
+            }
+            try {
+                connect();
+            } catch (IOException ex) {
+                System.err.println("[bsh-agent] cannot reach the IDE debug server on 127.0.0.1:"
+                        + port + " (" + ex + "); aborting");
+                System.exit(EXIT_DEBUG_UNAVAILABLE);
+            }
+            Thread reader = new Thread(new Runnable() {
+                public void run() {
+                    readerLoop();
+                }
+            }, "bsh-agent-reader");
+            reader.setDaemon(true);
+            reader.start();
+            return true;
+        }
+    }
+
+    /**
+     * This thread's state, registered on first use so the reader can dispatch to it.
+     *
+     * <p>The protocol id is ours rather than {@code Thread.getId()}: ids start at 1 and stay small,
+     * which keeps them readable in a trace, and a JVM's thread ids are neither.
+     */
+    private static ThreadState stateFor() {
+        ThreadState existing = STATE.get();
+        if (existing != null) {
+            return existing;
+        }
+        Thread current = Thread.currentThread();
+        ThreadState created = new ThreadState(nextThreadId.getAndIncrement(), current.getName());
+        STATE.set(created);
+        threadsById.put(Integer.valueOf(created.id), created);
+        return created;
     }
 
     /** The call stack, innermost frame first. Empty rather than null if the shape is unexpected. */
@@ -746,33 +981,36 @@ public final class BshHook {
      * are the same object) and when there is no interpreter to ask — the rewriting path, which is
      * handed a namespace only.
      */
-    private static void writeScopes(int frameId) throws IOException {
-        Object namespace = frame(frameId);
-        Object global = globalNameSpace();
+    private static void writeScopes(ThreadState state, int requestId, int frameId) throws IOException {
+        Object namespace = frame(state, frameId);
+        Object global = globalNameSpace(state);
         boolean hasGlobal = global != null && global != namespace;
-        out.writeByte(EVT_SCOPES);
-        if (namespace == null) {
-            out.writeInt(hasGlobal ? 1 : 0);
-        } else {
-            out.writeInt(hasGlobal ? 2 : 1);
-            out.writeUTF("Locals");
-            out.writeInt(handleFor(namespace));
+        synchronized (WRITE_LOCK) {
+            out.writeByte(EVT_SCOPES);
+            out.writeInt(requestId);
+            if (namespace == null) {
+                out.writeInt(hasGlobal ? 1 : 0);
+            } else {
+                out.writeInt(hasGlobal ? 2 : 1);
+                out.writeUTF("Locals");
+                out.writeInt(handleFor(state, namespace));
+            }
+            if (hasGlobal) {
+                out.writeUTF("Global");
+                out.writeInt(handleFor(state, global));
+            }
+            out.flush();
         }
-        if (hasGlobal) {
-            out.writeUTF("Global");
-            out.writeInt(handleFor(global));
-        }
-        out.flush();
     }
 
     /**
      * Answers {@link #CMD_VARIABLES}: the children of one handle, each with a handle of its own
      * when it can be expanded further.
      */
-    private static void writeVariables(int handle) throws IOException {
+    private static void writeVariables(ThreadState state, int requestId, int handle) throws IOException {
         List<String[]> children;
         List<Object> values;
-        Object target = handles.get(Integer.valueOf(handle));
+        Object target = state.handles.get(Integer.valueOf(handle));
         children = new ArrayList<String[]>();
         values = new ArrayList<Object>();
         try {
@@ -795,21 +1033,24 @@ public final class BshHook {
         } catch (Throwable ignored) {
             // Send whatever was gathered; an unreadable object is not worth failing the session.
         }
-        out.writeByte(EVT_VARIABLES);
-        out.writeInt(children.size());
-        for (int i = 0; i < children.size(); i++) {
-            String[] entry = children.get(i);
-            out.writeUTF(entry[0]);
-            out.writeUTF(entry[1]);
-            out.writeUTF(entry[2]);
-            out.writeInt(expandable(values.get(i)) ? handleFor(values.get(i)) : NO_HANDLE);
+        synchronized (WRITE_LOCK) {
+            out.writeByte(EVT_VARIABLES);
+            out.writeInt(requestId);
+            out.writeInt(children.size());
+            for (int i = 0; i < children.size(); i++) {
+                String[] entry = children.get(i);
+                out.writeUTF(entry[0]);
+                out.writeUTF(entry[1]);
+                out.writeUTF(entry[2]);
+                out.writeInt(expandable(values.get(i)) ? handleFor(state, values.get(i)) : NO_HANDLE);
+            }
+            out.flush();
         }
-        out.flush();
     }
 
-    /** The namespace of one frame of the current stop, or null when there is no such frame. */
-    private static Object frame(int frameId) {
-        return frameId >= 0 && frameId < currentFrames.length ? currentFrames[frameId] : null;
+    /** The namespace of one frame of this thread's current stop, or null when there is no such frame. */
+    private static Object frame(ThreadState state, int frameId) {
+        return frameId >= 0 && frameId < state.frames.length ? state.frames[frameId] : null;
     }
 
     /** Either a value, or the reason there is not one. Both are ordinary answers. */
@@ -817,30 +1058,41 @@ public final class BshHook {
         final boolean ok;
         final String text;
         final Object value;
+        /**
+         * Whose handle table an expandable result belongs in. Null on failure, where there is no
+         * value to expand -- carried on the outcome rather than passed alongside it so the two can
+         * never disagree about which thread asked.
+         */
+        final ThreadState state;
 
-        private Outcome(boolean ok, String text, Object value) {
+        private Outcome(boolean ok, String text, Object value, ThreadState state) {
             this.ok = ok;
             this.text = text;
             this.value = value;
+            this.state = state;
         }
 
-        static Outcome of(Object value) {
-            return new Outcome(true, render(value), value);
+        static Outcome of(ThreadState state, Object value) {
+            return new Outcome(true, render(value), value, state);
         }
 
         static Outcome failed(String reason) {
-            return new Outcome(false, reason, null);
+            return new Outcome(false, reason, null, null);
         }
     }
 
     /** Writes an {@link Outcome} as the reply to whichever request produced it. */
-    private static void writeEvaluated(int event, Outcome outcome) throws IOException {
-        out.writeByte(event);
-        out.writeBoolean(outcome.ok);
-        out.writeUTF(truncate(outcome.text));
-        out.writeUTF(outcome.ok ? typeName(outcome.value) : "");
-        out.writeInt(outcome.ok && expandable(outcome.value) ? handleFor(outcome.value) : NO_HANDLE);
-        out.flush();
+    private static void writeEvaluated(int event, int requestId, Outcome outcome) throws IOException {
+        synchronized (WRITE_LOCK) {
+            out.writeByte(event);
+            out.writeInt(requestId);
+            out.writeBoolean(outcome.ok);
+            out.writeUTF(truncate(outcome.text));
+            out.writeUTF(outcome.ok ? typeName(outcome.value) : "");
+            out.writeInt(outcome.ok && expandable(outcome.value)
+                    ? handleFor(outcome.state, outcome.value) : NO_HANDLE);
+            out.flush();
+        }
     }
 
     /**
@@ -854,20 +1106,20 @@ public final class BshHook {
      * <p>Note that {@code Interpreter.eval} returns plain Java, unwrapping the {@code bsh.Primitive}
      * that a namespace lookup would hand back, so the result needs no conversion here.
      */
-    private static Outcome evaluate(int frameId, String expression) {
-        Object namespace = frame(frameId);
+    private static Outcome evaluate(ThreadState state, int frameId, String expression) {
+        Object namespace = frame(state, frameId);
         if (namespace == null) {
             return Outcome.failed("No frame " + frameId + " at this stop");
         }
-        if (currentInterpreter == null) {
+        if (state.interpreter == null) {
             return Outcome.failed("No interpreter available at this stop");
         }
         try {
             if (interpreterEval == null) {
                 interpreterEval = accessible(
-                        currentInterpreter.getClass().getMethod("eval", String.class, nameSpaceClass));
+                        state.interpreter.getClass().getMethod("eval", String.class, nameSpaceClass));
             }
-            return Outcome.of(interpreterEval.invoke(currentInterpreter, expression, namespace));
+            return Outcome.of(state, interpreterEval.invoke(state.interpreter, expression, namespace));
         } catch (Throwable t) {
             return Outcome.failed(describe(t, expression));
         }
@@ -883,34 +1135,35 @@ public final class BshHook {
      * field, an array element, a list slot, a map entry — is reached reflectively, since there is no
      * expression that names it.
      */
-    private static Outcome assign(int frameId, int handle, String name, String expression) {
-        if (frame(frameId) == null) {
+    private static Outcome assign(ThreadState state, int frameId, int handle, String name,
+            String expression) {
+        if (frame(state, frameId) == null) {
             return Outcome.failed("No frame " + frameId + " at this stop");
         }
-        Object target = handles.get(Integer.valueOf(handle));
+        Object target = state.handles.get(Integer.valueOf(handle));
         if (target == null) {
             return Outcome.failed("This value is no longer available");
         }
         if (isNameSpace(target)) {
-            Outcome assigned = evaluate(frameId, name + " = (" + expression + ")");
+            Outcome assigned = evaluate(state, frameId, name + " = (" + expression + ")");
             if (!assigned.ok) {
                 return assigned;
             }
             // Read the variable back rather than reporting what went in: BeanShell may have coerced
             // it to the declared type, and the IDE should show what is actually stored.
             try {
-                return Outcome.of(nameSpaceGetVariable.invoke(target, name));
+                return Outcome.of(state, nameSpaceGetVariable.invoke(target, name));
             } catch (Throwable t) {
                 return assigned;
             }
         }
-        Outcome evaluated = evaluate(frameId, expression);
-        return evaluated.ok ? store(target, name, evaluated.value) : evaluated;
+        Outcome evaluated = evaluate(state, frameId, expression);
+        return evaluated.ok ? store(state, target, name, evaluated.value) : evaluated;
     }
 
     /** Stores an already-evaluated value into an array element, a list slot, a map entry or a field. */
     @SuppressWarnings("unchecked")
-    private static Outcome store(Object target, String name, Object value) {
+    private static Outcome store(ThreadState state, Object target, String name, Object value) {
         try {
             if (target.getClass().isArray()) {
                 int index = indexIn(name);
@@ -918,7 +1171,7 @@ public final class BshHook {
                     return Outcome.failed("Not an element of this array: " + name);
                 }
                 java.lang.reflect.Array.set(target, index, value);
-                return Outcome.of(java.lang.reflect.Array.get(target, index));
+                return Outcome.of(state, java.lang.reflect.Array.get(target, index));
             }
             if (target instanceof List) {
                 List<Object> list = (List<Object>) target;
@@ -927,10 +1180,10 @@ public final class BshHook {
                     return Outcome.failed("Not an element of this list: " + name);
                 }
                 list.set(index, value);
-                return Outcome.of(list.get(index));
+                return Outcome.of(state, list.get(index));
             }
             if (target instanceof Map) {
-                return storeInMap((Map<Object, Object>) target, name, value);
+                return storeInMap(state, (Map<Object, Object>) target, name, value);
             }
             if (target instanceof Iterable) {
                 // The child names here are iteration positions rather than identities, so there is
@@ -944,7 +1197,7 @@ public final class BshHook {
             }
             field.setAccessible(true);
             field.set(target, value);
-            return Outcome.of(field.get(target));
+            return Outcome.of(state, field.get(target));
         } catch (Throwable t) {
             return Outcome.failed(reason(t));
         }
@@ -955,7 +1208,8 @@ public final class BshHook {
      * carries. Two keys that render alike are therefore ambiguous, and writing to whichever came
      * first would be a silent guess — so that case is refused rather than resolved.
      */
-    private static Outcome storeInMap(Map<Object, Object> map, String name, Object value) {
+    private static Outcome storeInMap(ThreadState state, Map<Object, Object> map, String name,
+            Object value) {
         Object key = null;
         boolean found = false;
         for (Object candidate : map.keySet()) {
@@ -973,7 +1227,7 @@ public final class BshHook {
         // Written through the map rather than through Map.Entry.setValue, which not every
         // implementation honours once iteration has finished.
         map.put(key, value);
-        return Outcome.of(map.get(key));
+        return Outcome.of(state, map.get(key));
     }
 
     /** Walks outwards exactly as {@link #collectValue} does when it lists the fields. */
@@ -1234,35 +1488,35 @@ public final class BshHook {
      *
      * <p>Absent on the rewriting path, which is handed a namespace and never an {@code Interpreter}.
      */
-    private static Object globalNameSpace() {
-        if (currentInterpreter == null) {
+    private static Object globalNameSpace(ThreadState state) {
+        if (state.interpreter == null) {
             return null;
         }
         try {
             if (interpreterGetGlobalNameSpace == null) {
                 interpreterGetGlobalNameSpace =
-                        accessible(currentInterpreter.getClass().getMethod("getNameSpace"));
+                        accessible(state.interpreter.getClass().getMethod("getNameSpace"));
             }
-            return interpreterGetGlobalNameSpace.invoke(currentInterpreter);
+            return interpreterGetGlobalNameSpace.invoke(state.interpreter);
         } catch (Throwable t) {
             return null;
         }
     }
 
     /** Handles are identity-based, so expanding the same object twice does not grow the table. */
-    private static int handleFor(Object value) {
-        for (Map.Entry<Integer, Object> entry : handles.entrySet()) {
+    private static int handleFor(ThreadState state, Object value) {
+        for (Map.Entry<Integer, Object> entry : state.handles.entrySet()) {
             if (entry.getValue() == value) {
                 return entry.getKey().intValue();
             }
         }
-        int handle = nextHandle++;
-        handles.put(Integer.valueOf(handle), value);
+        int handle = nextHandle.getAndIncrement();
+        state.handles.put(Integer.valueOf(handle), value);
         return handle;
     }
 
-    private static void releaseHandles() {
-        handles.clear();
+    private static void releaseHandles(ThreadState state) {
+        state.handles.clear();
         // Handles keep counting up rather than restarting at 1, so a reply that crosses a resume
         // cannot be mistaken for an answer about a different object.
     }
@@ -1278,7 +1532,7 @@ public final class BshHook {
         if (reflectionFailed) {
             return false;
         }
-        synchronized (LOCK) {
+        synchronized (CONNECT_LOCK) {
             if (nodeGetLineNumber != null) {
                 return true;
             }

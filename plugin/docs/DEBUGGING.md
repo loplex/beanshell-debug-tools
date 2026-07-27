@@ -230,9 +230,24 @@ the plugin realm lives in. That one needs `runIde`. If it did not, the symptom i
 specific: with `AGENT` selected the launch fails with the agent-jar message, and with
 `AGENT_OR_REWRITE` the console says the script was rewritten instead.
 
+## Threads
+
+Two script threads are told apart and suspended independently. Each `STOPPED` names its
+thread, the Threads combo lists every suspended one (`XSuspendContext.getExecutionStacks`),
+and `mode`/`stepDepth`/`currentDepth` and the frames are per thread — so a Step Over on one
+does not change where another stops.
+
+**Only the thread that hit the breakpoint suspends.** The others keep running and may report
+while it is parked. That is the honest scope rather than a weaker "suspend all": an
+instrumenting agent can only stop a thread where it calls the hook, so freezing a thread that
+is inside Java code is not something it can offer.
+
+The **rewriting path** reports its thread id too, but still holds one lock per stop, so a
+second thread waits there instead of reporting alongside.
+
 ## Limitations
 
-- The protocol carries no thread id and the hook holds a global lock while
-  suspended, so two script threads cannot be told apart or suspended
-  independently. Tracked in [`docs/FUTURE_WORK.md`](../../docs/FUTURE_WORK.md#threads),
-  which is precise about where the work actually is (the hook, not the protocol).
+- The rewriting path cannot suspend two threads at once (above), cannot expand values, and
+  cannot evaluate — it is handed a `NameSpace` and no `Interpreter`.
+- The IDE is never told a thread *finished*; it learns of one from its first stop. Costs
+  nothing in practice — a finished thread simply never stops again.

@@ -56,41 +56,80 @@ interface BshValueSource {
      */
     val supportsEvaluation: Boolean
 
-    /** Scopes of one frame, as `name to handle`. */
-    fun scopes(frameId: Int): List<Pair<String, Int>>
+    /**
+     * Scopes of one frame, as `name to handle`.
+     *
+     * Every call takes a `threadId` because more than one thread may be suspended, each with its own
+     * frames and its own handle table. Passing the wrong one does not silently answer about the wrong
+     * thread — handle ids are unique across threads, so a mismatched request finds nothing.
+     */
+    fun scopes(threadId: Int, frameId: Int): List<Pair<String, Int>>
 
-    fun variables(handle: Int): List<BshVariable>
+    fun variables(threadId: Int, handle: Int): List<BshVariable>
 
-    fun evaluate(frameId: Int, expression: String): BshEvalResult?
+    fun evaluate(threadId: Int, frameId: Int, expression: String): BshEvalResult?
 
     /** Stores the value of [expression] into the [name] child of [containerHandle]. */
-    fun setVariable(frameId: Int, containerHandle: Int, name: String, expression: String): BshEvalResult?
+    fun setVariable(
+        threadId: Int,
+        frameId: Int,
+        containerHandle: Int,
+        name: String,
+        expression: String,
+    ): BshEvalResult?
 }
 
-class BshSuspendContext(
+/**
+ * One suspended script thread, as the Threads combo and the Frames panel see it.
+ *
+ * The [threadId] is what makes every later request unambiguous: scopes, variables, evaluation and
+ * resume all name the thread they concern, because more than one may be suspended at once.
+ */
+class BshThreadStack(
+    val threadId: Int,
+    threadName: String,
     frames: List<BshFrameInfo>,
     scriptFile: VirtualFile,
     lineOf: (BshFrameInfo) -> Int,
     source: BshValueSource,
-) : XSuspendContext() {
-    private val stack = BshExecutionStack(frames, scriptFile, lineOf, source)
-    override fun getActiveExecutionStack(): XExecutionStack = stack
-}
+) : XExecutionStack(displayName(threadId, threadName)) {
 
-class BshExecutionStack(
-    frames: List<BshFrameInfo>,
-    scriptFile: VirtualFile,
-    lineOf: (BshFrameInfo) -> Int,
-    source: BshValueSource,
-) : XExecutionStack("BeanShell") {
-
-    private val frames = frames.map { BshStackFrame(it, scriptFile, lineOf(it), source) }
+    private val frames = frames.map { BshStackFrame(it, scriptFile, lineOf(it), source, threadId) }
 
     override fun getTopFrame(): XStackFrame? = frames.firstOrNull()
 
     override fun computeStackFrames(firstFrameIndex: Int, container: XStackFrameContainer) {
         container.addStackFrames(frames.drop(firstFrameIndex), true)
     }
+
+    private companion object {
+        /**
+         * What the Threads combo shows. The JVM thread name leads, because that is what the script
+         * chose ("bsh-X") and what its own output will mention; the protocol id follows so two
+         * threads sharing a name are still distinguishable.
+         */
+        fun displayName(threadId: Int, threadName: String): String =
+            if (threadName.isBlank()) "BeanShell thread $threadId" else "$threadName [$threadId]"
+    }
+}
+
+/**
+ * The stop, from the platform's point of view: which thread the user is looking at, and which others
+ * are also suspended.
+ *
+ * [getExecutionStacks] is what populates the Threads combo. Returning every suspended thread rather
+ * than only the active one is the whole point — the agent suspends threads independently, so a second
+ * one can be parked while the user inspects the first, and it should be reachable without waiting for
+ * it to be resumed.
+ */
+class BshSuspendContext(
+    private val active: BshThreadStack,
+    private val all: List<BshThreadStack>,
+) : XSuspendContext() {
+
+    override fun getActiveExecutionStack(): XExecutionStack = active
+
+    override fun getExecutionStacks(): Array<XExecutionStack> = all.toTypedArray()
 }
 
 class BshStackFrame(
@@ -98,6 +137,8 @@ class BshStackFrame(
     private val scriptFile: VirtualFile,
     private val line: Int,
     private val source: BshValueSource,
+    /** Which suspended thread this frame belongs to; every request about it carries this. */
+    private val threadId: Int,
 ) : XStackFrame() {
 
     /**
@@ -110,9 +151,9 @@ class BshStackFrame(
 
     override fun computeChildren(node: XCompositeNode) {
         val children = XValueChildrenList()
-        for ((_, handle) in source.scopes(info.id)) {
-            for (variable in source.variables(handle)) {
-                children.add(variable.name, BshValue(variable, source, info.id, handle))
+        for ((_, handle) in source.scopes(threadId, info.id)) {
+            for (variable in source.variables(threadId, handle)) {
+                children.add(variable.name, BshValue(variable, source, threadId, info.id, handle))
             }
         }
         node.addChildren(children, true)
@@ -120,7 +161,7 @@ class BshStackFrame(
 
     /** Watches and the Evaluate dialog evaluate in the scope of whichever frame is selected. */
     override fun getEvaluator(): XDebuggerEvaluator? =
-        if (source.supportsEvaluation) BshEvaluator(info.id, source) else null
+        if (source.supportsEvaluation) BshEvaluator(threadId, info.id, source) else null
 
     /** What the Frames panel shows. `global` is bsh's name for the script's top level. */
     override fun customizePresentation(component: com.intellij.ui.ColoredTextContainer) {
@@ -136,6 +177,8 @@ class BshStackFrame(
 class BshValue(
     private val variable: BshVariable,
     private val source: BshValueSource,
+    /** The suspended thread this value belongs to. */
+    private val threadId: Int,
     /** The frame this value was read in, which is also where a replacement expression is evaluated. */
     private val frameId: Int,
     /**
@@ -160,15 +203,15 @@ class BshValue(
             return
         }
         val children = XValueChildrenList()
-        for (child in source.variables(variable.childHandle)) {
-            children.add(child.name, BshValue(child, source, frameId, variable.childHandle))
+        for (child in source.variables(threadId, variable.childHandle)) {
+            children.add(child.name, BshValue(child, source, threadId, frameId, variable.childHandle))
         }
         node.addChildren(children, true)
     }
 
     override fun getModifier(): XValueModifier? =
         if (source.supportsEvaluation && containerHandle != NO_HANDLE) {
-            BshValueModifier(variable, source, frameId, containerHandle)
+            BshValueModifier(variable, source, threadId, frameId, containerHandle)
         } else {
             null
         }
@@ -182,13 +225,14 @@ class BshValue(
  * later, from wherever the answer arrives.
  */
 private class BshEvaluator(
+    private val threadId: Int,
     private val frameId: Int,
     private val source: BshValueSource,
 ) : XDebuggerEvaluator() {
 
     override fun evaluate(expression: String, callback: XEvaluationCallback, expressionPosition: XSourcePosition?) {
         onPooledThread {
-            val result = source.evaluate(frameId, expression)
+            val result = source.evaluate(threadId, frameId, expression)
             when {
                 result == null -> callback.errorOccurred(NO_ANSWER)
                 !result.ok -> callback.errorOccurred(result.value)
@@ -196,6 +240,7 @@ private class BshEvaluator(
                     BshValue(
                         BshVariable(expression, result.value, result.type, result.childHandle),
                         source,
+                        threadId,
                         frameId,
                         // A result is not stored anywhere, so there is nothing to assign back into.
                         NO_HANDLE,
@@ -213,13 +258,15 @@ private class BshEvaluator(
 private class BshValueModifier(
     private val variable: BshVariable,
     private val source: BshValueSource,
+    private val threadId: Int,
     private val frameId: Int,
     private val containerHandle: Int,
 ) : XValueModifier() {
 
     override fun setValue(expression: XExpression, callback: XModificationCallback) {
         onPooledThread {
-            val result = source.setVariable(frameId, containerHandle, variable.name, expression.expression)
+            val result =
+                source.setVariable(threadId, frameId, containerHandle, variable.name, expression.expression)
             when {
                 result == null -> callback.errorOccurred(NO_ANSWER)
                 !result.ok -> callback.errorOccurred(result.value)

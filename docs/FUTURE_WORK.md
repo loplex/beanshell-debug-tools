@@ -9,49 +9,43 @@ agent ships inside the plugin and the fixtures are in the repository.
 
 ---
 
-## Threads
+## Threads — done
 
-Two script threads cannot be told apart or suspended independently. Worth being
-precise about the size of this, because the protocol change is the *small* part and
-reads like the whole job.
+Two script threads are told apart and suspended independently as of protocol 3. Kept here as
+a record of where the work actually was, since the earlier estimate in this file had it in the
+wrong place.
 
-Exercised by `agent/samples/scripts/06_callbacks_threads.bsh` and `DebugHost`
-scenario 5.
+**The protocol was the small part**, as predicted: a thread id and name on `STOPPED`, a thread
+id on every command, and request ids on the four that expect a reply. Fully specified in
+[`PROTOCOL.md`](PROTOCOL.md).
 
-**Protocol.** A thread id on `STOPPED` and on every request, plus request ids —
-today a reply is matched by arrival order, which is sound only while one request is
-in flight (see the desync note in `BshDebugProcess.exchange`). That is a version 3,
-but it is mechanical.
+**The hook was the work**, also as predicted, and the structural change was the one that
+mattered: a suspended thread used to read its own commands off the socket, which cannot work
+once two are suspended — only one can be the reader. So the agent gained a dedicated daemon
+reader thread that demultiplexes into per-thread mailboxes, and everything that was static
+(`frames`, `interpreter`, `handles`, `runMode`) became per-thread. The old single lock, which
+was held for the whole of a stop and was therefore *the* reason two threads could not both be
+suspended, now guards only the moments bytes go on the wire.
 
-**The hook is the real work.** Its suspended state is all static: `LOCK`,
-`currentFrames`, `currentInterpreter`, `handles`, `nextHandle`. Making those
-per-thread is straightforward; the structural change is that **the hook has no
-thread of its own today**. A suspended thread reads its own commands off the socket,
-which cannot work once two are suspended — only one can be reading. It needs a
-dedicated reader that demultiplexes into per-thread mailboxes, and `runMode` and the
-step depth become per-thread with it. That new thread lives on the bootstrap
-classpath inside somebody else's JVM, so getting its lifecycle wrong hangs a real
-Maven build rather than a test.
+**The suspend policy turned out not to be a choice.** The plan was to decide between stopping
+one thread and stopping all; in fact an instrumenting agent can only stop a thread where it
+calls the hook, so "suspend all" would mean "stop the others whenever they next reach a
+statement" — a different guarantee with the same name. Only the thread that hit the breakpoint
+suspends, and that is documented as the honest scope rather than offered as an option.
 
-**IDE side.** `mode`, `stepDepth` and `currentDepth` become per-thread;
-`exchange` becomes a map of pending requests keyed by id; `XSuspendContext` gains
-`getExecutionStacks()` with one stack per thread. And a suspend policy has to be
-decided — whether a breakpoint stops the thread that hit it or all of them — which
-both JDWP and DAP make a per-breakpoint choice, so it is UI as well as plumbing.
+**On the IDE side** `mode`, `stepDepth`, `currentDepth` and the frames became per-thread,
+`XSuspendContext.getExecutionStacks()` populates the Threads combo with every suspended thread,
+and the request channel is keyed by request id. That last change also retired an old hazard: a
+timed-out request used to poison the channel for good, because its late reply would have been
+handed to the next request as its own answer.
 
-**Does DAP have to come first?** No — and the earlier note here overstated it. The
-work splits cleanly:
+The **rewriting fallback** speaks protocol 3 too — it reports its thread id and echoes request
+ids, so the IDE needs no special case — but still holds one lock per stop, so a second thread
+waits there rather than reporting alongside. That path exists to need nothing at all, and
+independent suspension needs a reader thread of its own.
 
-- The **hook** work (a reader thread, per-thread state, per-thread mailboxes) is
-  transport-independent. It is the expensive part, and DAP would not change a line of
-  it. A DAP-speaking agent needs it just as much.
-- Only the **presentation** is written twice, and only if the plugin later moves onto
-  a DAP client: `XSuspendContext.getExecutionStacks()` today, a `Thread` event when
-  LSP4IJ grows one. That is the small half.
-
-So threads can be done for IntelliJ now, and are worth doing on their own terms. What
-does *not* work is the reverse order — routing IntelliJ through DAP first would lose
-threads on the way, since [LSP4IJ] does not implement the `Thread` event.
+Exercised by `agent/checks/05-two-script-threads.sh` against
+`agent/samples/scripts/06_callbacks_threads.bsh`.
 
 ---
 
@@ -76,7 +70,7 @@ DAP** ([IJPL-83441] is open), and [LSP4IJ] supplies a general DAP client that la
 `Pause`, `ExceptionInfo`, `SetFunctionBreakpoints` and the `Thread` event — that
 last gap being exactly the threads item above.
 
-Having adopted the vocabulary first — protocol 2 is `stackTrace`/`scopes`/
+Having adopted the vocabulary first — protocol 3 is `stackTrace`/`scopes`/
 `variables`/`evaluate`/`setVariable` with lazy handles, under different names — is
 what makes this a transport swap rather than a redesign. A DAP-speaking agent is a
 debug adapter any DAP client can attach to, which is why the agent stays an

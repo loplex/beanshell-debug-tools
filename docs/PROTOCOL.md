@@ -1,6 +1,6 @@
 # The BeanShell debug wire protocol
 
-Version **2**. The reference specification: everything an implementation of either end
+Version **3**. The reference specification: everything an implementation of either end
 needs, and the reasoning behind the parts that are not obvious.
 
 Two implementations of the agent end live in this repository — the instrumenting JVM
@@ -57,6 +57,10 @@ IDE -> agent                     agent -> IDE
   0x07  SET_VARIABLE
 ```
 
+**Everything is addressed to a thread**, except `SET_BREAKPOINTS` — the breakpoint set is
+shared. An IDE-to-agent message carries `threadId` immediately after the opcode; the four
+that expect an answer then carry a `requestId` which the reply echoes back.
+
 Request and reply have **separate opcodes** even where the payload shape is identical
 (`EVALUATED` vs `VARIABLE_SET`). A reader that can name the reply it expected can tell
 a desync from a bad answer.
@@ -67,6 +71,8 @@ a desync from a bad answer.
 
 ```
 byte  0x10
+int   threadId      the agent's own small id, stable for the thread's life; >= 1
+utf   threadName    the JVM thread's name ("main", "bsh-X"), for the Threads combo
 int   line          1-based, in the agent's own coordinates (see below)
 int   callDepth     CallStack.depth(): +1 per method frame, unaffected by blocks/loops
 int   frameCount
@@ -94,6 +100,7 @@ The rewriting agent reports **`frameCount = 1`**. It is handed a `NameSpace` and
 
 ```
 byte  0x11
+int   requestId     echoes the request
 int   count
 count times:
   utf name          "Locals", "Global"
@@ -109,6 +116,7 @@ and only under the instrumenting agent — the rewriting one has no `Interpreter
 
 ```
 byte  0x12
+int   requestId     echoes the request
 int   count
 count times:
   utf name
@@ -134,6 +142,7 @@ of a scripted class, the namespace a closure captured, and a `This` handed back 
 
 ```
 byte  0x13
+int   requestId     echoes the request
 byte  ok            1 = value, 0 = failed
 utf   value         the result, or the reason when ok = 0
 utf   type
@@ -150,10 +159,11 @@ Identical shape to `0x13`; `value`/`type` describe the value **after** assignmen
 
 ```
 byte  0x01
+int   threadId
 ```
 
-Releases the reported statement. The agent drops its handle table here
-([§6](#6-handles)).
+Releases that thread's reported statement, and only that thread's. The agent drops that
+thread's handle table here ([§6](#6-handles)); another suspended thread keeps its own.
 
 ### `0x02 SET_BREAKPOINTS`
 
@@ -178,24 +188,27 @@ injected-pom path never sends this and takes the round-trip per statement instea
 
 ```
 byte  0x03
+int   threadId
 byte  mode          0 = running, 1 = stepping
 ```
 
-While stepping, the agent must report every statement, because the IDE owns the
-step decision (`BshStepLogic` compares call depths). Stepping is interactive, so a
+Per thread, because stepping one thread must not make the others report every statement as
+well. While stepping, the agent must report every statement on that thread, because the IDE
+owns the step decision (`BshStepLogic` compares call depths). Stepping is interactive, so a
 round-trip is invisible; running is what needed fixing.
 
 ### `0x04 SCOPES` / `0x05 VARIABLES` / `0x06 EVALUATE` / `0x07 SET_VARIABLE`
 
 ```
-byte  0x04   int frameId
-byte  0x05   int handle
-byte  0x06   int frameId, utf expression
-byte  0x07   int frameId, int handle, utf name, utf expression
+byte  0x04   int threadId, int requestId, int frameId
+byte  0x05   int threadId, int requestId, int handle
+byte  0x06   int threadId, int requestId, int frameId, utf expression
+byte  0x07   int threadId, int requestId, int frameId, int handle, utf name, utf expression
 ```
 
-All four are **only valid while the agent is suspended**, since that is when the state
-exists and when the agent is reading.
+All four are **only valid while the named thread is suspended**, since that is when its
+state exists. They are served *on that thread*, from the loop where it waits to be resumed:
+only it can safely touch its own BeanShell state.
 
 `SET_VARIABLE` carries a frame *as well as* the container, because the new value is an
 expression that has to be evaluated somewhere: `h.count = other + 1` needs the frame's
@@ -217,26 +230,46 @@ would silently continue the script.
 
 These are what an implementation can rely on, and what it must preserve.
 
-1. **A reply is always the next thing on the wire.** Requests are served on the
-   interpreter thread, from inside the same loop that waits for `RESUME` — the thread is
-   parked there anyway, it owns the state being inspected, and answering from anywhere
-   else would need a lock BeanShell does not offer. So replies arrive in request order
-   and **no request ids are needed**.
+1. **A reply is matched by its request id, never by arrival order.** This was the opposite in
+   version 2, where requests were served from the suspended thread's own loop and a reply was
+   always the next thing on the wire. With two threads suspendable, thread B may report a stop —
+   or have its own request answered — between A's request and A's answer, so both ends
+   demultiplex: the agent by thread, the IDE by request id.
 
-   The IDE side depends on this: one in-flight request, a capacity-1 queue, guarded by a
-   lock. A **timeout breaks it** — a late reply would be handed to the *next* request as
-   its own — so a timed-out channel is written off permanently rather than reused.
+   The old shape also made a **timeout unsafe**: a late reply would be collected by the next
+   request as its own answer, which is why a timed-out channel had to be written off for good.
+   With ids, a late reply simply finds no waiter and is dropped.
 
-2. **The first statement is always reported**, because the agent opens the connection on
-   its first report and cannot know the breakpoints sooner.
+2. **Only the thread that hit a breakpoint is suspended.** Others keep running, and may report
+   while it is parked. This is not a weaker "suspend all" — it is what an instrumenting agent
+   can do at all. A thread is only ever stopped where it calls the hook, so a thread in the
+   middle of Java code cannot be frozen; "suspend all" would really mean "stop the others
+   whenever they next reach a statement", which is a different guarantee wearing the same name.
 
-3. **One thread.** The protocol has no thread id, and a second suspended script thread
-   cannot be told apart or resumed independently. See
-   [`FUTURE_WORK.md`](FUTURE_WORK.md#threads); this is what version 3 is reserved for.
+3. **Requests are served on the thread they concern**, from inside the loop where it waits to be
+   resumed. Not a shortcut: that thread owns the BeanShell state being inspected, and answering
+   from anywhere else would need a lock BeanShell does not offer. The agent's reader thread only
+   ever *routes* a request into that thread's mailbox.
 
-4. **No version negotiation**, because there is nothing to negotiate with: the agent jar
-   ships inside the plugin, so both ends are always the same build. An independently
-   published agent would change this, and is the other reason version 3 exists.
+4. **The first statement is always reported**, because the agent opens the connection on its
+   first report and cannot know the breakpoints sooner.
+
+5. **Thread ids are the agent's own**, small and starting at 1, not `Thread.getId()`. Stable for
+   as long as the thread lives. An id the agent no longer knows (the thread finished) makes a
+   request a no-op rather than an error.
+
+6. **No version negotiation**, because there is nothing to negotiate with: the agent jar ships
+   inside the plugin, so both ends are always the same build. An independently published agent
+   would change this — see [`FUTURE_WORK.md`](FUTURE_WORK.md#dap-as-the-transport).
+
+### What the rewriting agent does differently
+
+It reports its thread id and echoes request ids like the instrumenting one, so the IDE needs no
+special case. But it **keeps one lock for the whole of a stop**, so a second script thread waits
+rather than reporting alongside. That is deliberate: this path exists to need nothing — no agent,
+no JVM flag, no bootstrap classloader — and independent suspension needs a reader thread of its
+own. It also reports `frameCount = 1` always, having been handed a `NameSpace` rather than a
+`CallStack`.
 
 ## 6. Handles
 
@@ -244,7 +277,10 @@ A handle is an opaque non-zero `int` naming a value the IDE may expand. `0` is n
 issued, so it doubles as "this value has nothing to expand" in `VARIABLES`.
 
 Handles are **identity-based** (expanding the same object twice returns the same handle)
-and **valid only until the next `RESUME`**, where the table is dropped. That is what
+and **valid only until that thread's next `RESUME`**, where its table is dropped. The tables
+are per thread but the ids are allocated globally, so a handle can only ever mean one object:
+a request naming the wrong thread finds nothing rather than silently expanding a different
+thread's value that happened to share a number. That is what
 makes them safe rather than merely compact: the IDE can never hold a reference into a
 script that has moved on, so there is no stale-object problem to solve and no cleanup
 protocol to get wrong.
@@ -302,8 +338,13 @@ design. The costs and the current blockers are in
 **2** — both directions opcode-tagged; lazy variable handles; `evaluate` and
 `setVariable`. Current.
 
-**3** (reserved) — a thread id on `STOPPED` and on every request, plus request ids,
-which invariant 1 currently stands in for. Needed by threads and by an independently
-published agent.
+**3** — a thread id on `STOPPED` and on every request, plus request ids on the four that
+expect a reply. Threads are suspended and resumed independently, each with its own frames,
+handle table and run mode. Current.
+
+**4** (nothing reserved yet) — the likely contents are a capabilities handshake and a
+`threadExited` event. Today the IDE learns of a thread from its first `STOPPED` and never hears
+that it finished, which costs nothing in practice: a finished thread simply never stops again,
+and a request naming it is a no-op.
 
 [dap]: https://microsoft.github.io/debug-adapter-protocol/specification

@@ -9,6 +9,7 @@ import java.net.Socket;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * Debug agent injected into the forked BeanShell JVM.
@@ -60,6 +61,15 @@ public final class BshDebugAgent {
 
     private static final Object LOCK = new Object();
 
+    /**
+     * Protocol thread ids, assigned in the order threads first report.
+     *
+     * <p>A {@code WeakHashMap} so a finished script thread does not keep its {@code Thread} object
+     * alive. Losing an entry costs nothing: a thread that never reports again never needs its id, and
+     * one that does gets a fresh id, which the IDE treats as a new thread.
+     */
+    private static final Map<Thread, Integer> threadIds = new WeakHashMap<Thread, Integer>();
+
     private static final int port;
     private static boolean disabled;
     private static Socket socket;
@@ -86,7 +96,16 @@ public final class BshDebugAgent {
     private BshDebugAgent() {
     }
 
-    /** Invoked by the instrumented script before each statement. */
+    /**
+     * Invoked by the instrumented script before each statement.
+     *
+     * <p>Unlike the instrumenting agent, this path keeps the lock for the whole of a stop, so a
+     * second script thread reaching a statement waits here until the first is resumed. That is a
+     * deliberate limit rather than an oversight: this hook exists to need nothing — no agent, no JVM
+     * flag, no bootstrap classloader — and independent thread suspension needs a reader thread of its
+     * own. It still <em>reports</em> its thread id honestly, so the IDE shows which thread stopped
+     * and never merges two of them into one stack.
+     */
     public static void step(int line, Object namespace) {
         synchronized (LOCK) {
             if (disabled) {
@@ -109,7 +128,10 @@ public final class BshDebugAgent {
                 // NameSpace does not know its caller -- so unlike the instrumenting agent, which
                 // is given the whole CallStack, this path cannot produce a stack at all. The frame
                 // count in the protocol is what lets both report honestly.
+                Thread current = Thread.currentThread();
                 out.writeByte(EVT_STOPPED);
+                out.writeInt(threadId(current));
+                out.writeUTF(current.getName());
                 out.writeInt(line);
                 out.writeInt(callDepth());
                 out.writeInt(1);
@@ -128,11 +150,32 @@ public final class BshDebugAgent {
         }
     }
 
+    /**
+     * A small, stable protocol id for a thread.
+     *
+     * <p>Ours rather than {@code Thread.getId()} for the same reason as in the instrumenting agent:
+     * ids start at 1 and stay readable, and a JVM's own thread ids are neither. Keyed on the Thread
+     * object, so a thread keeps its id for as long as the IDE might refer to it.
+     */
+    private static int threadId(Thread thread) {
+        synchronized (threadIds) {
+            Integer existing = threadIds.get(thread);
+            if (existing != null) {
+                return existing.intValue();
+            }
+            int assigned = threadIds.size() + 1;
+            threadIds.put(thread, Integer.valueOf(assigned));
+            return assigned;
+        }
+    }
+
     /*
-     * Protocol 2, the same wire format the instrumenting agent speaks -- see BshDebugProcess.
+     * Protocol 3, the same wire format the instrumenting agent speaks -- see docs/PROTOCOL.md.
      * This path only ever needs a subset: it reports one frame and serves variable requests for
      * it, and it never receives breakpoints, so it keeps reporting every statement.
      */
+    private static final int CMD_SET_BREAKPOINTS = 0x02;
+    private static final int CMD_SET_RUN_MODE = 0x03;
     private static final int CMD_SCOPES = 0x04;
     private static final int CMD_VARIABLES = 0x05;
     private static final int CMD_EVALUATE = 0x06;
@@ -159,22 +202,45 @@ public final class BshDebugAgent {
     /** The one handle this path issues: the frame's namespace. Variables are flat, so no more. */
     private static final int NAMESPACE_HANDLE = 1;
 
-    /** Blocks until the IDE resumes, answering whatever it asks about the current frame first. */
+    /**
+     * Blocks until the IDE resumes, answering whatever it asks about the current frame first.
+     *
+     * <p>Every request carries the thread it concerns and a request id its reply must echo. Both are
+     * read and the thread id discarded: only one thread can be suspended on this path at a time, so
+     * a request can only ever be about this one. The request id matters, though — the IDE
+     * demultiplexes replies by it and would otherwise wait forever.
+     */
     private static void serveUntilResume(Object namespace) throws IOException {
         while (true) {
             int command = in.readByte() & 0xFF;
+            if (command == CMD_SET_BREAKPOINTS) {
+                // Carries no thread id. Read and discarded: this path never filters, so it keeps
+                // reporting every statement -- but the bytes have to be consumed or the stream
+                // desynchronises for good.
+                int count = in.readInt();
+                for (int i = 0; i < count; i++) {
+                    in.readUTF();
+                    in.readInt();
+                }
+                continue;
+            }
+            in.readInt();  // thread id; only one thread is ever suspended here
             if (command == CMD_SCOPES) {
+                int requestId = in.readInt();
                 in.readInt(); // frame id; there is only ever frame 0 here
                 out.writeByte(EVT_SCOPES);
+                out.writeInt(requestId);
                 out.writeInt(1);
                 out.writeUTF("Locals");
                 out.writeInt(NAMESPACE_HANDLE);
                 out.flush();
             } else if (command == CMD_VARIABLES) {
+                int requestId = in.readInt();
                 int handle = in.readInt();
                 Map<String, String> variables =
                         handle == NAMESPACE_HANDLE ? readVariables(namespace) : Collections.<String, String>emptyMap();
                 out.writeByte(EVT_VARIABLES);
+                out.writeInt(requestId);
                 out.writeInt(variables.size());
                 for (Map.Entry<String, String> entry : variables.entrySet()) {
                     out.writeUTF(entry.getKey());
@@ -186,15 +252,19 @@ public final class BshDebugAgent {
                 }
                 out.flush();
             } else if (command == CMD_EVALUATE) {
+                int requestId = in.readInt();
                 in.readInt();  // frame id
                 in.readUTF();  // expression
-                refuse(EVT_EVALUATED);
+                refuse(EVT_EVALUATED, requestId);
             } else if (command == CMD_SET_VARIABLE) {
+                int requestId = in.readInt();
                 in.readInt();  // frame id
                 in.readInt();  // container handle
                 in.readUTF();  // name
                 in.readUTF();  // expression
-                refuse(EVT_VARIABLE_SET);
+                refuse(EVT_VARIABLE_SET, requestId);
+            } else if (command == CMD_SET_RUN_MODE) {
+                in.readByte();  // mode; this path never filters, so nothing to apply
             } else {
                 // CMD_RESUME, and anything unrecognised, which must not be able to wedge a script.
                 return;
@@ -203,8 +273,9 @@ public final class BshDebugAgent {
     }
 
     /** Answers a request this path cannot serve, keeping the script suspended. */
-    private static void refuse(int event) throws IOException {
+    private static void refuse(int event, int requestId) throws IOException {
         out.writeByte(event);
+        out.writeInt(requestId);
         out.writeBoolean(false);
         out.writeUTF(NOT_SUPPORTED);
         out.writeUTF("");

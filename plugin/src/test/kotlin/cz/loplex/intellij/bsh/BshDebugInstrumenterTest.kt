@@ -84,6 +84,12 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
                 try {
                     while (true) {
                         assertEquals(EVT_STOPPED, input.readByte().toInt() and 0xFF)
+                        // Protocol 3 leads with the thread the stop belongs to. This path suspends
+                        // only one thread at a time, but it still reports which one, so the IDE never
+                        // has to guess.
+                        val threadId = input.readInt()
+                        assertTrue("a thread id was reported", threadId >= 1)
+                        assertTrue("the thread was named", input.readUTF().isNotEmpty())
                         val line = input.readInt()
                         val depth = input.readInt()
                         // One frame from this path: a rewritten script gives the hook a NameSpace,
@@ -93,19 +99,28 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
                         input.readUTF()
                         input.readInt()
 
-                        // Variables are pulled now, so ask the way the IDE does.
+                        // Variables are pulled now, so ask the way the IDE does. Every request names
+                        // its thread and carries a request id the reply must echo back.
+                        var requestId = 1
                         out.writeByte(CMD_SCOPES)
+                        out.writeInt(threadId)
+                        out.writeInt(requestId)
                         out.writeInt(0)
                         out.flush()
                         assertEquals(EVT_SCOPES, input.readByte().toInt() and 0xFF)
+                        assertEquals("the reply echoes the request id", requestId, input.readInt())
                         val scopes = (0 until input.readInt()).map { input.readUTF() to input.readInt() }
 
                         val vars = LinkedHashMap<String, String>()
                         for ((_, handle) in scopes) {
+                            requestId++
                             out.writeByte(CMD_VARIABLES)
+                            out.writeInt(threadId)
+                            out.writeInt(requestId)
                             out.writeInt(handle)
                             out.flush()
                             assertEquals(EVT_VARIABLES, input.readByte().toInt() and 0xFF)
+                            assertEquals(requestId, input.readInt())
                             repeat(input.readInt()) {
                                 val name = input.readUTF()
                                 vars[name] = input.readUTF()
@@ -117,23 +132,31 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
                         // and the point of the assertion is that it *answers*. An opcode it does not
                         // serve would otherwise fall through to "resume", silently letting the script
                         // run on because the IDE asked a question. Reading EVT_* here proves it did not.
+                        requestId++
                         out.writeByte(CMD_EVALUATE)
+                        out.writeInt(threadId)
+                        out.writeInt(requestId)
                         out.writeInt(0)
                         out.writeUTF("1 + 1")
                         out.flush()
                         assertEquals(EVT_EVALUATED, input.readByte().toInt() and 0xFF)
+                        assertEquals(requestId, input.readInt())
                         assertFalse("evaluation refused, not answered", input.readBoolean())
                         refusals.add(input.readUTF())
                         input.readUTF()
                         input.readInt()
 
+                        requestId++
                         out.writeByte(CMD_SET_VARIABLE)
+                        out.writeInt(threadId)
+                        out.writeInt(requestId)
                         out.writeInt(0)
                         out.writeInt(1)
                         out.writeUTF("y")
                         out.writeUTF("0")
                         out.flush()
                         assertEquals(EVT_VARIABLE_SET, input.readByte().toInt() and 0xFF)
+                        assertEquals(requestId, input.readInt())
                         assertFalse("assignment refused, not answered", input.readBoolean())
                         refusals.add(input.readUTF())
                         input.readUTF()
@@ -141,6 +164,7 @@ class BshDebugInstrumenterTest : BasePlatformTestCase() {
 
                         frames.add(Frame(line, depth, vars))
                         out.writeByte(CMD_RESUME)
+                        out.writeInt(threadId)
                         out.flush()
                     }
                 } catch (_: EOFException) {

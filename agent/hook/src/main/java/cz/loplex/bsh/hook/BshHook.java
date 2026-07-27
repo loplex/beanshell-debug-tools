@@ -236,10 +236,13 @@ public final class BshHook {
     private static Method nameSpaceGetVariableNames;
     private static Method nameSpaceGetVariable;
     private static Method nameSpaceGetParent;
+    private static Method thisGetNameSpace;
+    private static Method interpreterGetGlobalNameSpace;
     private static Method callStackToArray;
     private static Method nameSpaceGetName;
     private static Field nameSpaceCallerInfoNode;
     private static Class<?> nameSpaceClass;
+    private static Class<?> thisClass;
     private static Method interpreterEval;
     private static Method primitiveGetType;
     private static boolean reflectionFailed;
@@ -733,19 +736,31 @@ public final class BshHook {
     /**
      * Answers {@link #CMD_SCOPES}: the scopes of one frame, each a handle the IDE can expand.
      *
-     * <p>One scope per frame today. The shape is DAP's rather than the simplest possible one
-     * because splitting locals from a closure's captured namespace is a presentation change here
-     * and a protocol change if the level does not exist.
+     * <p>Two scopes, and the second is the point of having the level at all: <b>Global</b> is the
+     * interpreter's own namespace, which is where a script's top-level state lives once execution has
+     * descended into a method. Without it, stopping inside a method shows the method's locals and
+     * nothing else — the script's own globals become invisible exactly when they are most likely to
+     * be what is wrong.
+     *
+     * <p>Global is omitted when it <i>is</i> the frame's namespace (a stop at top level, where the two
+     * are the same object) and when there is no interpreter to ask — the rewriting path, which is
+     * handed a namespace only.
      */
     private static void writeScopes(int frameId) throws IOException {
         Object namespace = frame(frameId);
+        Object global = globalNameSpace();
+        boolean hasGlobal = global != null && global != namespace;
         out.writeByte(EVT_SCOPES);
         if (namespace == null) {
-            out.writeInt(0);
+            out.writeInt(hasGlobal ? 1 : 0);
         } else {
-            out.writeInt(1);
+            out.writeInt(hasGlobal ? 2 : 1);
             out.writeUTF("Locals");
             out.writeInt(handleFor(namespace));
+        }
+        if (hasGlobal) {
+            out.writeUTF("Global");
+            out.writeInt(handleFor(global));
         }
         out.flush();
     }
@@ -763,6 +778,17 @@ public final class BshHook {
         try {
             if (isNameSpace(target)) {
                 collectNamespace(target, children, values);
+            } else if (isThis(target)) {
+                // Expand a This as the scope it stands for, not as a Java object. Its Java fields are
+                // the interpreter's plumbing; the namespace is the script's own view of that scope.
+                // Falls through to reflection if the namespace cannot be read, rather than showing
+                // nothing.
+                Object namespace = thisNameSpace(target);
+                if (namespace != null) {
+                    collectNamespace(namespace, children, values);
+                } else {
+                    collectValue(target, children, values);
+                }
             } else if (target != null) {
                 collectValue(target, children, values);
             }
@@ -1172,6 +1198,57 @@ public final class BshHook {
         return candidate != null && nameSpaceClass != null && nameSpaceClass.isInstance(candidate);
     }
 
+    /**
+     * Whether a value is a {@code bsh.This} — BeanShell's handle on a namespace.
+     *
+     * <p>Worth its own test because a {@code This} is never interesting as a Java object. Its Java
+     * fields are the interpreter's plumbing; what a debugger user wants is the *namespace* behind it,
+     * which is the script's own view: the variables and methods that scope holds. Three separate
+     * things in the UI turn out to be this one case — the {@code _bshThis…} field on an instance of a
+     * scripted class, the namespace a closure captured, and a {@code This} a script handed back to
+     * Java.
+     */
+    private static boolean isThis(Object candidate) {
+        return candidate != null && thisClass != null && thisClass.isInstance(candidate);
+    }
+
+    /**
+     * The namespace behind a {@code bsh.This}, or null if it cannot be read.
+     *
+     * <p>{@code This.getNameSpace()} is public, but {@code This} itself is loaded by whichever loader
+     * BeanShell came from, so it is reached reflectively like everything else here.
+     */
+    private static Object thisNameSpace(Object value) {
+        try {
+            if (thisGetNameSpace == null) {
+                thisGetNameSpace = accessible(thisClass.getMethod("getNameSpace"));
+            }
+            return thisGetNameSpace.invoke(value);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * The interpreter's global namespace, or null when there is no interpreter to ask.
+     *
+     * <p>Absent on the rewriting path, which is handed a namespace and never an {@code Interpreter}.
+     */
+    private static Object globalNameSpace() {
+        if (currentInterpreter == null) {
+            return null;
+        }
+        try {
+            if (interpreterGetGlobalNameSpace == null) {
+                interpreterGetGlobalNameSpace =
+                        accessible(currentInterpreter.getClass().getMethod("getNameSpace"));
+            }
+            return interpreterGetGlobalNameSpace.invoke(currentInterpreter);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /** Handles are identity-based, so expanding the same object twice does not grow the table. */
     private static int handleFor(Object value) {
         for (Map.Entry<Integer, Object> entry : handles.entrySet()) {
@@ -1231,6 +1308,13 @@ public final class BshHook {
                     nameSpaceCallerInfoNode.setAccessible(true);
                 } catch (Throwable t) {
                     nameSpaceCallerInfoNode = null;
+                }
+                // bsh.This, loaded from BeanShell's own loader rather than named. Optional: without
+                // it a This is expanded as a plain Java object, which is worse but not broken.
+                try {
+                    thisClass = nameSpaceClass.getClassLoader().loadClass("bsh.This");
+                } catch (Throwable t) {
+                    thisClass = null;
                 }
                 return true;
             } catch (Throwable t) {

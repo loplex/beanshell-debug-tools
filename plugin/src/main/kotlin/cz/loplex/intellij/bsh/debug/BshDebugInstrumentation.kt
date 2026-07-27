@@ -10,7 +10,10 @@ import java.io.File
  * There are two working mechanisms and they are not equivalent, so the choice is explicit rather
  * than implicit.
  */
-enum class BshInstrumentationMode {
+enum class BshInstrumentationMode(
+    /** What the run configuration's combo box shows. */
+    val label: String,
+) {
 
     /**
      * Instrument the BeanShell interpreter with a `-javaagent` and leave the script untouched.
@@ -28,7 +31,7 @@ enum class BshInstrumentationMode {
      *  * **Brace-less bodies.** `if (x) foo();` cannot be rewritten without detaching the body,
      *    but the agent reports the body node without moving any text.
      */
-    AGENT,
+    AGENT("JVM agent — instrument the interpreter, leave the script untouched"),
 
     /**
      * Rewrite the script before launch, prefixing a hook call to every safe statement.
@@ -37,17 +40,21 @@ enum class BshInstrumentationMode {
      * bootstrap classloader. That makes it the fallback when the agent jar cannot be located or
      * when a host JVM refuses an agent.
      */
-    REWRITE,
+    REWRITE("Rewrite the script — no agent jar, no JVM flag"),
     ;
 
     companion object {
+        /** What a run configuration starts out with, and where an unreadable setting lands. */
+        val DEFAULT: BshInstrumentationMode = AGENT
+
         /**
-         * The mechanism debug sessions use.
+         * Reads a stored name, tolerating anything it does not recognise.
          *
-         * A constant for now, intended to become a setting once both paths have seen real use —
-         * at which point this reads the configuration instead and the enum stays as it is.
+         * Run-configuration options are persisted as text in the project, so this has to survive a
+         * value written by a different version of the plugin — or edited by hand. Falling back to
+         * [DEFAULT] costs the user their choice; refusing to launch would cost them the session.
          */
-        val CURRENT: BshInstrumentationMode = AGENT
+        fun of(name: String?): BshInstrumentationMode = values().firstOrNull { it.name == name } ?: DEFAULT
     }
 }
 

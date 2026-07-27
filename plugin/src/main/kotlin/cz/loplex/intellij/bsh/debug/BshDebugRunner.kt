@@ -51,9 +51,9 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
         } ?: throw ExecutionException("Not a BeanShell file: ${configuration.scriptPath}")
 
         // AGENT mode instruments the interpreter and runs the script untouched; REWRITE mode
-        // prefixes hook calls into a temp copy. Falling back keeps a session working when the
-        // agent jar is missing, which matters while it is not yet bundled with the plugin.
-        val agentJar = if (BshInstrumentationMode.CURRENT == BshInstrumentationMode.AGENT) {
+        // prefixes hook calls into a temp copy. A missing agent jar still falls back rather than
+        // failing the launch: a degraded session beats no session, and the user asked to debug.
+        val agentJar = if (configuration.instrumentation == BshInstrumentationMode.AGENT) {
             BshDebugAgentJar.locate()
         } else {
             null

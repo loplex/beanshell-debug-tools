@@ -44,13 +44,6 @@ implement the `Thread` event, so a DAP transport would not carry this anyway.
 
 ---
 
-## Turn `BshInstrumentationMode.CURRENT` into a real setting
-
-It is a compile-time constant today. The rewriting fallback is genuinely useful
-(it needs no agent jar and no JVM flag), so choosing it should not require a build —
-and now that only the agent can evaluate expressions, the two paths differ enough
-that the choice belongs to the user rather than to the build.
-
 ## Filter BeanShell's own fields out of a scripted class instance
 
 Expanding an instance of a class declared in a script shows a `_bshThis…` field
@@ -68,9 +61,9 @@ last gap being exactly the threads item above.
 
 Having adopted the vocabulary first — protocol 2 is `stackTrace`/`scopes`/
 `variables`/`evaluate`/`setVariable` with lazy handles, under different names — is
-what makes this a transport swap rather than a redesign. A DAP-speaking agent is a debug adapter any
-DAP client can attach to, which is why the agent stays an independently publishable
-subproject rather than a source set of the plugin.
+what makes this a transport swap rather than a redesign. A DAP-speaking agent is a
+debug adapter any DAP client can attach to, which is why the agent stays an
+independently publishable subproject rather than a source set of the plugin.
 
 [IJPL-83441]: https://youtrack.jetbrains.com/issue/IJPL-83441/Debug-adapter-protocol-support
 [LSP4IJ]: https://github.com/redhat-developer/lsp4ij

@@ -67,6 +67,9 @@ running scripts out of the box.
 - A **variables view** that expands nested objects, collections, maps and arrays,
   plus **Watches**, the **Evaluate** dialog, and **Set Value** on a variable — all
   evaluated by the real interpreter in the selected frame.
+- Two instrumentation mechanisms, chosen per run configuration: a **JVM agent**
+  that leaves the script on disk untouched (default), or **rewriting** the script,
+  which needs no agent jar and no JVM flag but shows one frame and cannot evaluate.
 - With the Java plugin present, breakpoints in the **Java code** called from a
   script are honored by a companion Java (JDWP) debug session.
 

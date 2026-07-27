@@ -3,10 +3,13 @@ package cz.loplex.intellij.bsh.run
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.options.SettingsEditor
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.TextBrowseFolderListener
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.ui.RawCommandLineEditor
+import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.util.ui.FormBuilder
+import cz.loplex.intellij.bsh.debug.BshInstrumentationMode
 import javax.swing.JComponent
 import javax.swing.JPanel
 
@@ -17,6 +20,9 @@ class BshSettingsEditor : SettingsEditor<BshRunConfiguration>() {
     private val jrePath = TextFieldWithBrowseButton()
     private val workingDirectory = TextFieldWithBrowseButton()
     private val programArguments = RawCommandLineEditor()
+    private val instrumentation = ComboBox(BshInstrumentationMode.values()).apply {
+        renderer = SimpleListCellRenderer.create("") { it.label }
+    }
 
     private val panel: JPanel
 
@@ -51,6 +57,12 @@ class BshSettingsEditor : SettingsEditor<BshRunConfiguration>() {
             .addTooltip("Leave empty to use the bundled BeanShell; or point to a bsh jar / classes directory")
             .addLabeledComponent("JRE:", jrePath)
             .addTooltip("Leave empty to use the IDE runtime")
+            .addLabeledComponent("Debug instrumentation:", instrumentation)
+            .addTooltip(
+                "Only affects Debug. The agent leaves the script on disk untouched and reports the " +
+                    "whole call stack; rewriting needs no agent jar and no JVM flag, but shows one " +
+                    "frame, cannot expand nested values, and cannot evaluate expressions",
+            )
             .panel
     }
 
@@ -60,6 +72,7 @@ class BshSettingsEditor : SettingsEditor<BshRunConfiguration>() {
         workingDirectory.text = configuration.workingDirectory
         interpreterClasspath.text = configuration.interpreterClasspath
         jrePath.text = configuration.jrePath
+        instrumentation.selectedItem = configuration.instrumentation
     }
 
     override fun applyEditorTo(configuration: BshRunConfiguration) {
@@ -68,6 +81,8 @@ class BshSettingsEditor : SettingsEditor<BshRunConfiguration>() {
         configuration.workingDirectory = workingDirectory.text.trim()
         configuration.interpreterClasspath = interpreterClasspath.text.trim()
         configuration.jrePath = jrePath.text.trim()
+        configuration.instrumentation =
+            instrumentation.selectedItem as? BshInstrumentationMode ?: BshInstrumentationMode.DEFAULT
     }
 
     override fun createEditor(): JComponent = panel

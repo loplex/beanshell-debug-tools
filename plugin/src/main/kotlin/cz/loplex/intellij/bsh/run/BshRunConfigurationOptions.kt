@@ -14,6 +14,8 @@ class BshRunConfigurationOptions : RunConfigurationOptions() {
         string("").provideDelegate(this, "interpreterClasspath")
     private val jrePathProp: StoredProperty<String?> =
         string("").provideDelegate(this, "jrePath")
+    private val instrumentationProp: StoredProperty<String?> =
+        string("").provideDelegate(this, "instrumentation")
 
     var scriptPath: String
         get() = scriptPathProp.getValue(this).orEmpty()
@@ -36,4 +38,14 @@ class BshRunConfigurationOptions : RunConfigurationOptions() {
     var jrePath: String
         get() = jrePathProp.getValue(this).orEmpty()
         set(value) = jrePathProp.setValue(this, value)
+
+    /**
+     * Name of the `BshInstrumentationMode` to debug with; blank means the default.
+     *
+     * Stored as the enum's name rather than its ordinal, so reordering the enum cannot silently
+     * repoint every saved configuration at the other mechanism.
+     */
+    var instrumentation: String
+        get() = instrumentationProp.getValue(this).orEmpty()
+        set(value) = instrumentationProp.setValue(this, value)
 }

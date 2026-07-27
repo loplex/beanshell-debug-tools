@@ -12,14 +12,22 @@ the language rather than a gap someone could close — are in
 
 ## Which instrumentation runs
 
-There are two runtime mechanisms and one verification oracle. Selected by
-`BshInstrumentationMode.CURRENT`, today **`AGENT`**.
+There are two runtime mechanisms and one verification oracle. The mechanism is a
+per-configuration setting — *Debug instrumentation* in the BeanShell run
+configuration — defaulting to `AGENT`.
 
 | Implementation | Role |
 |---|---|
 | `agent/` (JVM agent) | **Default.** Instruments the interpreter; the script is untouched |
 | `debug/BshDebugInstrumenter.kt` (PSI) | Fallback. Needs only a source file — no agent, no JVM flag |
 | `tools/bshInstrumenter.main.kts` | **Not a runtime option.** A verification oracle |
+
+The setting is stored by enum **name** rather than ordinal, so reordering
+`BshInstrumentationMode` cannot silently repoint saved configurations at the other
+mechanism, and an unrecognised value falls back to the default rather than refusing
+to launch. Choosing `AGENT` with no agent jar available also falls back to rewriting:
+the user asked to debug, and a degraded session beats none. The Maven inline-script
+path always rewrites — there is no run configuration of its own to ask.
 
 The agent is preferred because rewriting is visible to the user: the injected call
 becomes a real statement, so it shows up in `getInvocationText()` and therefore in

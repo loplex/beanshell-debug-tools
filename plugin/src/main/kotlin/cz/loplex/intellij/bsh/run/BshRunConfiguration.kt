@@ -10,6 +10,7 @@ import com.intellij.execution.configurations.RuntimeConfigurationException
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.options.SettingsEditor
 import com.intellij.openapi.project.Project
+import cz.loplex.intellij.bsh.debug.BshInstrumentationMode
 import java.io.File
 
 class BshRunConfiguration(
@@ -40,6 +41,11 @@ class BshRunConfiguration(
     var jrePath: String
         get() = options.jrePath
         set(value) { options.jrePath = value }
+
+    /** How a Debug run gets its hooks into the script. Only consulted by the Debug executor. */
+    var instrumentation: BshInstrumentationMode
+        get() = BshInstrumentationMode.of(options.instrumentation)
+        set(value) { options.instrumentation = value.name }
 
     override fun getConfigurationEditor(): SettingsEditor<out RunConfiguration> = BshSettingsEditor()
 

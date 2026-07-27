@@ -1,9 +1,13 @@
 package cz.loplex.intellij.bsh.debug
 
 /*
- * The debug wire protocol, version 2. Both ends of it live in this repository -- the
- * instrumenting agent in `agent/`, the rewriting fallback in `debug/agent/BshDebugAgent.java` --
- * and the agent jar ships inside the plugin, so there is no version skew to negotiate.
+ * The debug wire protocol, version 2. The full specification -- framing, every field, the
+ * invariants and the failure modes -- is `docs/PROTOCOL.md`; this file is the IDE end's copy of the
+ * opcodes plus the notes that matter when reading the code around them.
+ *
+ * Both ends of it live in this repository -- the instrumenting agent in `agent/`, the rewriting
+ * fallback in `debug/agent/BshDebugAgent.java` -- and the agent jar ships inside the plugin, so
+ * there is no version skew to negotiate.
  *
  * Both directions are opcode-tagged. Version 1 had an untagged agent-to-IDE stream of statement
  * reports, which left nowhere for a reply to travel and so forced every variable to be pushed on

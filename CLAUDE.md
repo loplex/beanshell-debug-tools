@@ -42,6 +42,9 @@ coordinates and publishes just as well.
   (lexer, parser, PSI, resolution, completion).
 - [`plugin/docs/DEBUGGING.md`](plugin/docs/DEBUGGING.md) — the IDE side of debugging,
   and which of the three instrumentation implementations runs.
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — the debug wire protocol, in full: framing,
+  every message, the invariants an implementation must preserve, and the configuration
+  properties. The reference for anything that touches the wire.
 - [`docs/FUTURE_WORK.md`](docs/FUTURE_WORK.md) — open work, ordered by what blocks
   what. Read before starting anything.
 - [`docs/BEANSHELL-DEFECTS.md`](docs/BEANSHELL-DEFECTS.md) — upstream bugs in

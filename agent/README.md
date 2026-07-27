@@ -149,7 +149,10 @@ different digits.
 
 ## 3. Protocol
 
-Version 2. Both directions are opcode-tagged.
+Version 2. Both directions are opcode-tagged. **The full specification is
+[`docs/PROTOCOL.md`](../docs/PROTOCOL.md)** — framing, every field, the invariants and the
+failure modes. What follows is the summary, plus the parts whose *reasons* belong with the
+agent.
 
 ```
 agent -> IDE

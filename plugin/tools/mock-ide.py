@@ -52,6 +52,9 @@ Usage:
       --expand                                  open every expandable value one level
       --hold-stops N                            keep the first N threads suspended, to
                                                 observe two at once, then release them
+      --catch-all                               on the first breakpoint hit, tell the agent to
+                                                report every statement on every thread, the way
+                                                a Suspend: All breakpoint does
 
 An agent that has been given a breakpoint set stops reporting every statement and speaks
 up only where a breakpoint matches, which is what makes a loop usable. Note that the
@@ -88,6 +91,7 @@ CMD_SCOPES = 0x04
 CMD_VARIABLES = 0x05
 CMD_EVALUATE = 0x06
 CMD_SET_VARIABLE = 0x07
+CMD_SET_CATCH_ALL = 0x08
 
 EVT_STOPPED = 0x10
 EVT_SCOPES = 0x11
@@ -98,6 +102,9 @@ EVT_VARIABLE_SET = 0x14
 NO_HANDLE = 0
 
 REPLY_EVENTS = (EVT_SCOPES, EVT_VARIABLES, EVT_EVALUATED, EVT_VARIABLE_SET)
+
+# How long --hold-stops waits for the next thread before giving up and releasing what it holds.
+HOLD_TIMEOUT_SECONDS = 5.0
 
 
 def readn(f, n):
@@ -307,6 +314,11 @@ def main():
         "--expand", action="store_true", help="open every expandable value one level"
     )
     parser.add_argument(
+        "--catch-all",
+        action="store_true",
+        help="round up the other threads on the first breakpoint hit (Suspend: All)",
+    )
+    parser.add_argument(
         "--hold-stops",
         type=int,
         default=0,
@@ -330,8 +342,26 @@ def main():
     # Threads reported as stopped and not yet resumed. With --hold-stops this deliberately
     # grows, which is the only way to observe two script threads suspended at once.
     held = []
+    caught = False
     while True:
-        stop = s.stops.get()
+        # A bounded wait whenever something is being held. Without it, a quota that can no longer be
+        # met -- because the other threads have finished -- would leave the held thread parked for
+        # good, and with it any thread joining on it. The wait also stands in for the human pause
+        # between a stop and a resume, which is what gives the other threads time to be rounded up.
+        try:
+            stop = s.stops.get(timeout=HOLD_TIMEOUT_SECONDS) if held else s.stops.get()
+        except queue.Empty:
+            print(f"[mock-ide] nothing else stopped within {HOLD_TIMEOUT_SECONDS}s, releasing",
+                  flush=True)
+            if caught:
+                s.send(struct.pack(">Bb", CMD_SET_CATCH_ALL, 0))
+                caught = False
+                print("[mock-ide] catch-all off", flush=True)
+            for thread in held:
+                print(f"[mock-ide] releasing held thread={thread}", flush=True)
+                resume(s, thread)
+            held = []
+            continue
         if stop is None:
             print(f"[mock-ide] agent disconnected after {steps} step(s) (script done)", flush=True)
             break
@@ -362,6 +392,14 @@ def main():
             configured = True
             print(f"[mock-ide] pushed {len(breakpoints)} breakpoint(s)", flush=True)
 
+        if args.catch_all and at_breakpoint and not caught:
+            # What the IDE does for a Suspend: All breakpoint: every other thread now reports its
+            # next statement, so it can be held too.
+            s.send(struct.pack(">Bb", CMD_SET_CATCH_ALL, 1))
+            caught = True
+            print("[mock-ide] catch-all on: other threads will report their next statement",
+                  flush=True)
+
         if at_breakpoint and len(held) < args.hold_stops:
             held.append(stop["thread"])
             print(
@@ -375,6 +413,12 @@ def main():
             # once -- which is the whole thing being demonstrated.
             if len(held) < args.hold_stops:
                 continue
+            if caught:
+                # Symmetric with turning it on: leaving it set would make every statement on every
+                # thread a round-trip for the rest of the run.
+                s.send(struct.pack(">Bb", CMD_SET_CATCH_ALL, 0))
+                caught = False
+                print("[mock-ide] catch-all off", flush=True)
             for thread in held:
                 print(f"[mock-ide] releasing held thread={thread}", flush=True)
                 resume(s, thread)

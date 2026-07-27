@@ -237,10 +237,18 @@ thread, the Threads combo lists every suspended one (`XSuspendContext.getExecuti
 and `mode`/`stepDepth`/`currentDepth` and the frames are per thread — so a Step Over on one
 does not change where another stops.
 
-**Only the thread that hit the breakpoint suspends.** The others keep running and may report
-while it is parked. That is the honest scope rather than a weaker "suspend all": an
-instrumenting agent can only stop a thread where it calls the hook, so freezing a thread that
-is inside Java code is not something it can offer.
+**Suspend policy comes from the breakpoint**, using IntelliJ's own setting (right-click a
+breakpoint -> Suspend: Thread / All) — there is nothing of ours for the user to learn.
+
+- *Suspend: Thread* (default) stops only the thread that hit it; the others keep running.
+- *Suspend: All* rounds the others up: the agent is told to report every statement on every
+  thread, and each one is held as it arrives, so they appear in the Threads combo stopped on
+  lines that have no breakpoint. Cleared again on resume, because while it is set every
+  statement on every thread costs a round-trip.
+
+The round-up is **approximate, and inherently so**: a thread is only ever stopped where it
+calls the hook, so one sleeping or inside Java code keeps running until it next reaches a
+statement. "Everyone stops at their next statement" is the real guarantee.
 
 The **rewriting path** reports its thread id too, but still holds one lock per stop, so a
 second thread waits there instead of reporting alongside.

@@ -54,6 +54,7 @@ IDE -> agent                     agent -> IDE
   0x04  SCOPES                     0x13  EVALUATED      answers 0x06
   0x05  VARIABLES                  0x14  VARIABLE_SET   answers 0x07
   0x06  EVALUATE
+  0x08  SET_CATCH_ALL
   0x07  SET_VARIABLE
 ```
 
@@ -184,6 +185,31 @@ Only valid where the IDE's line mapping is the **identity**. Filtering needs bre
 expressed in the lines the agent reports, and the pom mapping has no inverse, so the
 injected-pom path never sends this and takes the round-trip per statement instead.
 
+### `0x08 SET_CATCH_ALL`
+
+```
+byte  0x08
+byte  on            1 = every thread reports its next statement, 0 = back to normal filtering
+```
+
+Global, like `SET_BREAKPOINTS`, and how **Suspend: All** is honoured. The IDE sets it when a
+breakpoint whose policy is `ALL` is hit, and clears it on resume.
+
+There is no way to freeze a thread from outside — it only ever stops where it calls the
+hook — so "suspend all" is built the other way round: every other thread reports its *next*
+statement even though no breakpoint sits there, and the IDE holds each one as it arrives. Two
+consequences worth stating plainly:
+
+- **It is not instantaneous.** A thread sleeping, blocked, or deep in Java code reports
+  nothing until it next reaches a script statement, and keeps running until then. "Everyone
+  stops at their next statement" is the real guarantee; "everyone stops now" is not on offer.
+- **While set, every statement on every running thread is a round-trip.** Acceptable only
+  because it lasts exactly as long as somebody is looking at a stopped thread — hence the
+  IDE clearing it on resume rather than leaving it on.
+
+The rewriting agent reads and ignores it: it holds one lock per stop, so the other threads are
+already waiting inside the hook and there is nothing to round up.
+
 ### `0x03 SET_RUN_MODE`
 
 ```
@@ -240,11 +266,11 @@ These are what an implementation can rely on, and what it must preserve.
    request as its own answer, which is why a timed-out channel had to be written off for good.
    With ids, a late reply simply finds no waiter and is dropped.
 
-2. **Only the thread that hit a breakpoint is suspended.** Others keep running, and may report
-   while it is parked. This is not a weaker "suspend all" — it is what an instrumenting agent
-   can do at all. A thread is only ever stopped where it calls the hook, so a thread in the
-   middle of Java code cannot be frozen; "suspend all" would really mean "stop the others
-   whenever they next reach a statement", which is a different guarantee wearing the same name.
+2. **By default only the thread that hit a breakpoint is suspended.** Others keep running, and
+   may report while it is parked. A breakpoint whose policy is Suspend: All rounds them up via
+   [`SET_CATCH_ALL`](#0x08-set_catch_all) — approximately, and the approximation is inherent: a
+   thread is only ever stopped where it calls the hook, so one inside Java code cannot be frozen.
+   "Everyone stops at their next statement" is what the protocol can promise.
 
 3. **Requests are served on the thread they concern**, from inside the loop where it waits to be
    resumed. Not a shortcut: that thread owns the BeanShell state being inspected, and answering

@@ -175,6 +175,7 @@ public final class BshDebugAgent {
      * it, and it never receives breakpoints, so it keeps reporting every statement.
      */
     private static final int CMD_SET_BREAKPOINTS = 0x02;
+    private static final int CMD_SET_CATCH_ALL = 0x08;
     private static final int CMD_SET_RUN_MODE = 0x03;
     private static final int CMD_SCOPES = 0x04;
     private static final int CMD_VARIABLES = 0x05;
@@ -213,6 +214,13 @@ public final class BshDebugAgent {
     private static void serveUntilResume(Object namespace) throws IOException {
         while (true) {
             int command = in.readByte() & 0xFF;
+            if (command == CMD_SET_CATCH_ALL) {
+                // Suspend: All rounds up the *other* threads, which this path has no way to reach --
+                // it holds one lock for the whole of a stop, so they are already waiting in step().
+                // The byte still has to be consumed or the stream desynchronises for good.
+                in.readByte();
+                continue;
+            }
             if (command == CMD_SET_BREAKPOINTS) {
                 // Carries no thread id. Read and discarded: this path never filters, so it keeps
                 // reporting every statement -- but the bytes have to be consumed or the stream

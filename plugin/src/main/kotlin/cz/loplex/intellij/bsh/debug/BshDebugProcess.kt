@@ -10,6 +10,7 @@ import com.intellij.xdebugger.XDebugSession
 import com.intellij.xdebugger.XSourcePosition
 import com.intellij.xdebugger.breakpoints.XBreakpointHandler
 import com.intellij.xdebugger.breakpoints.XBreakpointProperties
+import com.intellij.xdebugger.breakpoints.SuspendPolicy
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint
 import com.intellij.xdebugger.evaluation.XDebuggerEditorsProvider
 import com.intellij.xdebugger.frame.XSuspendContext
@@ -142,6 +143,14 @@ class BshDebugProcess(
      */
     @Volatile private var lastStoppedThread: Int = 0
 
+    /**
+     * Whether the current stop is a Suspend: All one, so arriving threads are held rather than let go.
+     *
+     * Read from the breakpoint that was hit — IntelliJ already offers the choice in the breakpoint's
+     * own properties, so there is nothing new for the user to learn and no setting of ours to invent.
+     */
+    @Volatile private var catchAll = false
+
     @Volatile private var stopped = false
     private var socket: Socket? = null
     private var output: OutputStream? = null
@@ -223,6 +232,16 @@ class BshDebugProcess(
         // Tell the agent what to filter before letting it go, so it applies from the very next
         // statement rather than one stop late.
         pushFilter(session)
+        if (catchAll) {
+            // Suspend: All is symmetric -- if the stop meant "everything stops", the resume has to
+            // mean "everything runs", or the threads rounded up would stay parked with nothing in
+            // the UI to release them.
+            catchAll = false
+            setCatchAll(false)
+            for (other in threads.values.filter { it.suspended && it.id != session.id }) {
+                releaseAgent(other.id)
+            }
+        }
         releaseAgent(session.id)
     }
 
@@ -432,11 +451,32 @@ class BshDebugProcess(
             thread.frames = frames
             thread.suspended = true
             lastStoppedThread = thread.id
+            // A Suspend: All breakpoint rounds up the other threads: they are told to report their
+            // next statement, and the branch below holds each one as it arrives.
+            if (breakpoint != null && breakpoint.suspendPolicy == SuspendPolicy.ALL) {
+                catchAll = true
+                setCatchAll(true)
+            }
             val context = suspendContext(thread)
             if (breakpoint != null) session.breakpointReached(breakpoint, null, context)
             else session.positionReached(context)
+        } else if (catchAll) {
+            // Rounded up rather than stopped in its own right: this thread reported only because a
+            // Suspend: All breakpoint is in force elsewhere. It is parked and listed in the Threads
+            // combo, but the platform is not told again -- doing so would move the user's selection
+            // off the thread they are actually reading.
+            thread.frames = frames
+            thread.suspended = true
         } else {
             releaseAgent(thread.id)
+        }
+    }
+
+    /** Turns the agent's report-everything mode on or off; see the hook's `catchAll`. */
+    private fun setCatchAll(on: Boolean) {
+        writeToAgent {
+            it.writeByte(CMD_SET_CATCH_ALL)
+            it.writeByte(if (on) 1 else 0)
         }
     }
 

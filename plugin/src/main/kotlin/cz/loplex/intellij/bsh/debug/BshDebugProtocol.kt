@@ -52,6 +52,7 @@ internal const val CMD_SCOPES = 0x04
 internal const val CMD_VARIABLES = 0x05
 internal const val CMD_EVALUATE = 0x06
 internal const val CMD_SET_VARIABLE = 0x07
+internal const val CMD_SET_CATCH_ALL = 0x08
 
 internal const val EVT_STOPPED = 0x10
 internal const val EVT_SCOPES = 0x11

@@ -21,6 +21,8 @@ Each one needs something a JVM test cannot arrange from inside itself:
 | `02-maven-plugin-realm.sh` | a **real `mvn` process**, because the thing under test is a Maven plugin's own classloader |
 | `03-scopes-and-introspection.sh` | two processes and a socket between them — the actual wire protocol |
 | `04-behaviour-unchanged.sh` | the same fixtures run twice, in separate JVMs, one with the agent |
+| `05-two-script-threads.sh` | two real threads, suspended at the same time over one socket |
+| `06-suspend-all.sh` | a thread stopping at a line that has no breakpoint on it |
 
 They are also the checks you want *while* changing the agent, one at a time, with the
 output in front of you — which is the other reason they are scripts.
@@ -50,6 +52,15 @@ scripted instance's `_bshThis…` field, a closure's captured scope, and a `This
 to Java), and that `Global` appears when stopped inside a method — where a script's
 top-level state would otherwise be invisible. Both regress silently: the panel still shows
 *something*.
+
+**`05` — two script threads.** The check the thread work exists for, and the one that could not
+pass before it: under protocol 2 a suspended thread *was* the socket reader, so two suspended at
+once was structurally impossible. Holds both parked simultaneously and asserts each reports its
+own locals.
+
+**`06` — Suspend: All.** That a thread stops at a line carrying **no breakpoint**, which is the
+only observation that distinguishes the round-up from ordinary per-thread suspension. Gives each
+thread its own code so the breakpoint can belong to one of them alone.
 
 **`04` — behaviour is unchanged.** The agent must not change what a script does. Allows
 exactly the three differences documented in [`../samples/README.md`](../samples/README.md)

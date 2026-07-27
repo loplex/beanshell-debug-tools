@@ -159,6 +159,13 @@ public final class BshHook {
     private static final int CMD_SET_RUN_MODE = 0x03;
 
     /**
+     * Turns "report everything, on every thread" on and off, so the IDE can round up the other
+     * threads when a breakpoint says Suspend: All. Global rather than per thread — that is what it
+     * means. See {@link #catchAll}.
+     */
+    private static final int CMD_SET_CATCH_ALL = 0x08;
+
+    /**
      * Requests the IDE may issue while a statement is suspended, each answered with the matching
      * {@code EVT_*} reply before the loop goes back to waiting.
      *
@@ -294,6 +301,21 @@ public final class BshHook {
      * <p>A message must be written under a single acquisition, or two threads' fields would
      * interleave into an unparseable stream.
      */
+    /**
+     * Whether every thread should report its next statement, whatever the breakpoints say.
+     *
+     * <p>How Suspend: All is honoured without pretending to be JDWP. A thread cannot be frozen from
+     * outside — it only ever stops where it calls the hook — so "suspend all" is implemented as
+     * "everyone reports at the next statement, and the IDE decides who stays stopped". The IDE sets
+     * this when a Suspend: All breakpoint is hit and clears it on resume.
+     *
+     * <p>Two honest consequences. It is <b>not instantaneous</b>: a thread sleeping, blocked, or deep
+     * in Java code reports nothing until it next reaches a script statement, so it keeps running for
+     * that long. And while set, every statement on every running thread costs a round-trip — which is
+     * acceptable precisely because it only lasts while somebody is looking at a stopped thread.
+     */
+    private static volatile boolean catchAll;
+
     private static final Object WRITE_LOCK = new Object();
 
     /** Guards {@link #connect} and the reader-thread start, which must happen exactly once. */
@@ -517,6 +539,12 @@ public final class BshHook {
      * one-byte protocol fully functional.
      */
     private static boolean shouldReport(ThreadState state, String sourceFile, int line) {
+        // Set while some thread is suspended under a Suspend: All breakpoint. Every other thread then
+        // reports its next statement so the IDE gets the chance to hold it too. Deliberately checked
+        // before the breakpoint map: the point is to report at a line that has no breakpoint.
+        if (catchAll) {
+            return true;
+        }
         Map<Integer, List<String>> configured = breakpointsByLine;
         if (configured == null || state.runMode != MODE_RUN) {
             return true;
@@ -576,6 +604,11 @@ public final class BshHook {
         try {
             while (true) {
                 int command = in.readByte() & 0xFF;
+                if (command == CMD_SET_CATCH_ALL) {
+                    // Global, so it carries no thread id and is applied here rather than routed.
+                    catchAll = in.readByte() != 0;
+                    continue;
+                }
                 if (command == CMD_SET_BREAKPOINTS) {
                     // Breakpoints are the one piece of shared configuration, so they are applied
                     // here rather than routed to a thread -- there may be no suspended thread to

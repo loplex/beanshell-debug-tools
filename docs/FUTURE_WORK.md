@@ -82,6 +82,33 @@ what makes this a transport swap rather than a redesign. A DAP-speaking agent is
 debug adapter any DAP client can attach to, which is why the agent stays an
 independently publishable subproject rather than a source set of the plugin.
 
+### Two transports rather than a swap
+
+The better shape is probably **both**: the native protocol for IntelliJ, DAP for
+everyone else, chosen by a system property at premain alongside `bsh.debug.port`.
+
+It is cheap because the split falls in the right place already. Everything expensive
+in the hook — deciding what is a statement, walking the call stack, rendering values,
+handing out handles, evaluating in a frame's namespace — produces *answers*, and only
+the last step turns an answer into bytes. Today that step is `DataOutputStream`
+writes; DAP would make it JSON over `Content-Length` framing. So the work is one
+serialisation layer behind an interface, not two debuggers.
+
+Two things genuinely differ and are worth knowing before starting:
+
+- **DAP is request/response with ids, this protocol is strictly alternating.** The
+  native side leans on "a reply is always next on the wire" to avoid request ids (see
+  [`PROTOCOL.md`](PROTOCOL.md#5-the-invariants)). A DAP layer needs the ids anyway, so
+  doing threads first — which also needs them — pays for both.
+- **DAP clients expect capabilities negotiation** (an `initialize` handshake), which
+  this protocol deliberately has none of. That is additive: the native transport keeps
+  answering "there is nothing to negotiate", the DAP one answers honestly about what
+  it does not implement.
+
+The reason to want it is unchanged: it is what makes the agent usable from VS Code,
+Neovim or Eclipse. The reason not to start with it is that it buys IntelliJ nothing —
+see the LSP4IJ gaps above.
+
 [IJPL-83441]: https://youtrack.jetbrains.com/issue/IJPL-83441/Debug-adapter-protocol-support
 [LSP4IJ]: https://github.com/redhat-developer/lsp4ij
 

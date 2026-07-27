@@ -182,12 +182,57 @@ Three things the IDE side is responsible for:
 Evaluation has its own, much longer timeout: a watch expression is arbitrary user
 code, so a few seconds is a plausible answer rather than a failure.
 
+## Verifying it without the IDE
+
+The live XDebug UI can only be checked by hand (`./gradlew :plugin:runIde`), but almost
+everything underneath it can be proven from a terminal — and the two halves fail in
+different places, so it is worth knowing which one you are testing.
+
+**Is the agent reaching the interpreter, and what does it report?** `bsh.debug.trace`
+prints every reported node to stderr and needs no listener at all. On a real Maven build:
+
+```bash
+./gradlew :agent:instrument:shadowJar
+AGENT=$PWD/agent/instrument/build/libs/bsh-debug-agent-1.0.0-SNAPSHOT.jar
+MAVEN_OPTS="-javaagent:$AGENT -Dbsh.debug.trace=1" \
+    mvn -o -f plugin/samples/maven/build-helper/pom.xml validate 2>&1 | grep bsh-agent
+```
+
+Every reported statement appears with its line and source name. For an inline
+`<script>`, the source name is the synthetic one BeanShell derives from the script text
+(`inline evaluation of: ``…''`) and the lines are **snippet-relative** — line 1 is the
+script's first line, not the pom's. Nothing appearing means the agent never saw
+BeanShell; `print.bsh` lines appearing means no source filter is set.
+
+**Is the transport right?** `tools/mock-ide.py` is the IDE end, standalone:
+
+```bash
+python3 plugin/tools/mock-ide.py 47791 --breakpoints my.bsh:9 --expand &
+java -javaagent:$AGENT -Dbsh.debug.port=47791 -Dbsh.debug.sources=my.bsh \
+     -cp <bsh.jar> bsh.Interpreter my.bsh
+```
+
+It prints the stack at each stop and, with `--expand`, opens every expandable value one
+level — which is how the scopes and the `This`-as-namespace expansion above were checked.
+`--eval` and `--set` exercise the other two requests.
+
+**Is behaviour unchanged?** `runHost` and `runHostWithAgent` must agree:
+
+```bash
+./gradlew :agent:samples:runHost > plain.txt
+./gradlew :agent:samples:runHostWithAgent > agent.txt
+diff plain.txt agent.txt      # only the differences listed in agent/samples/README.md
+```
+
+**What this cannot tell you** is whether IntelliJ's Maven runner passes
+`MavenRunnerSettings.vmOptions` (where the `-javaagent` is injected) through to the JVM
+the plugin realm lives in. That one needs `runIde`. If it did not, the symptom is
+specific: with `AGENT` selected the launch fails with the agent-jar message, and with
+`AGENT_OR_REWRITE` the console says the script was rewritten instead.
+
 ## Limitations
 
 - The protocol carries no thread id and the hook holds a global lock while
   suspended, so two script threads cannot be told apart or suspended
-  independently.
-- A scripted class instance shows BeanShell's own `_bshThis…` back-reference among
-  its fields, because it is a real field rather than a synthetic one.
-
-Both are tracked in [`docs/FUTURE_WORK.md`](../../docs/FUTURE_WORK.md).
+  independently. Tracked in [`docs/FUTURE_WORK.md`](../../docs/FUTURE_WORK.md#threads),
+  which is precise about where the work actually is (the hook, not the protocol).

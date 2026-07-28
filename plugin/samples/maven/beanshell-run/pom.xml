@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Single inline BeanShell script run by the genthaler beanshell-maven-plugin (goal: run).
+
+  Open this file, create a "bsh-enhanced Run Configuration" from the Maven tool window
+  (right-click the plugin's `run` goal), set a breakpoint inside the <script> below and
+  launch it in Debug: the "BeanShell (Maven)" tab stops on the breakpoint as the build runs.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example.bsh</groupId>
+    <artifactId>beanshell-run</artifactId>
+    <version>1.0.0</version>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.github.genthaler</groupId>
+                <artifactId>beanshell-maven-plugin</artifactId>
+                <version>1.4</version>
+                <executions>
+                    <execution>
+                        <id>greet</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <script><![CDATA[
+                                name = project.getName();
+                                total = 0;
+                                for (int i = 1; i <= 3; i++) {
+                                    total += i;
+                                    print("Building " + name + " step " + i);
+                                }
+                                print("sum = " + total);
+                            ]]></script>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,157 +1,77 @@
-# BeanShell Language Support for IntelliJ-based IDEs
+# bsh-plugin
 
-Language support for [BeanShell](https://beanshell.github.io/) scripts (`.bsh`):
-a full syntax tree, code intelligence, running, and a source-level debugger — plus
-BeanShell recognition inside Maven `pom.xml` configuration and XML in general.
+BeanShell (`.bsh`) tooling: an IntelliJ Platform plugin for language support and an
+in-editor debugger, plus a JVM debug agent that speaks the [Debug Adapter
+Protocol][dap] so VS Code, Neovim and Eclipse can debug BeanShell too.
 
-The core runs in **any IntelliJ-based IDE** (IDEA, WebStorm, PyCharm, CLion, …);
-Java-aware features — navigation into Java code, variable type inference and
-JVM-debugger attach — light up in **IntelliJ IDEA** and other IDEs that bundle the
-Java plugin.
-
-The language model follows the
-[**BeanShell 2.0b6**](https://github.com/beanshell/beanshell/tree/2.0b6) grammar
-([`bsh.jjt`](https://github.com/beanshell/beanshell/blob/2.0b6/src/bsh/bsh.jjt)),
-which is the version published to Maven Central and bundled with the plugin for
-running scripts out of the box.
-
-> Documentation index: [Architecture](docs/ARCHITECTURE.md) ·
-> [Debugging internals](docs/DEBUGGING.md)
-
-## Features
-
-### Editing
-- **Syntax highlighting** with a configurable color scheme
-  (*Settings → Editor → Color Scheme → BeanShell*).
-- **Code folding** of `{ }` blocks, block/doc comments, and consecutive imports.
-- **Brace matching**, line/block **commenting**, and an indentation **formatter**
-  (*Reformat Code*).
-- **Structure view** (Alt+7) and **breadcrumbs** for the enclosing class/method.
-- **Read/write highlighting** of the variable under the caret.
-- **Quick documentation** (Ctrl+Q) for declarations, including a preceding
-  Javadoc-style comment.
-- **Live templates** (`sout`, `fori`, `iter`, `ifn`, `whn`, `mdef`) and
-  **postfix templates** (`.sout`, `.if`, `.while`).
-- **Surround With** (Ctrl+Alt+T): `if`, `while`, `try/catch`.
-- **TODO** highlighting inside comments.
-
-### Code intelligence
-- A **full AST parser** (recursive descent with backtracking) that mirrors the
-  BeanShell grammar and reports syntax errors as you type.
-- **Go to Declaration / Find Usages / Rename** for methods, classes, typed and
-  untyped variables, and parameters; methods and classes also resolve across the
-  project's `.bsh` files.
-- **Code completion** for keywords and in-scope names.
-- **Parameter info** (Ctrl+P) and **inlay parameter-name hints** at call sites.
-- **Inspections** with quick fixes: unused variable/parameter, unreachable code,
-  and (opt-in) unresolved method call.
-- **Introduce Variable** intention and **Go to Symbol** (Ctrl+Alt+Shift+N).
-
-### Java interoperability *(requires the Java plugin — optional)*
-- **Ctrl+Click into Java**: class names (FQN, `java.lang.*`, imported), and
-  members reached through **static type propagation** across a chain, e.g.
-  `report.append("x").append("y")` or `list.get(0)`.
-- **BeanShell class members**: `greeter.greet()` navigates to the `greet`
-  method of a `Greeter` class declared in the script.
-
-### Running
-- A **BeanShell run configuration**; right-click a `.bsh` file → *Run*.
-- The interpreter is **bundled** (`org.apache-extras.beanshell:bsh:2.0b6`), so
-  scripts run with no setup; the classpath is overridable per configuration.
-- Uses the **project JDK** when available (falls back to the IDE runtime).
-
-### Debugging
-- A **source-level debugger** for `.bsh` files: line breakpoints, a variables
-  view, and Step Over / Into / Out (see [docs/DEBUGGING.md](docs/DEBUGGING.md)).
-- With the Java plugin present, breakpoints in the **Java code** called from a
-  script are honored by a companion Java (JDWP) debug session.
-
-### File recognition & injection
-BeanShell is recognized in several ways:
-- files with the **`.bsh`** extension;
-- extensionless scripts whose **shebang** launches BeanShell, including the
-  self-executing polyglot (`#!/bin/sh` … `exec java bsh.Interpreter "$0"`);
-- inline scripts in the **`<configuration>`** of specific Maven plugins
-  (see below);
-- any XML element preceded by a **`<!--language=BeanShell-->`** comment.
-
-## Maven inline scripts
-
-Several Maven plugins accept an inline BeanShell script in their configuration.
-BeanShell is injected into those properties (in `pom.xml`) so the full tool-chain
-works inside them. The curated list lives in
-[`src/main/resources/beanshell/maven-scripts.txt`](src/main/resources/beanshell/maven-scripts.txt)
-and is easy to extend — one line per property:
+One Gradle build, four subprojects:
 
 ```
-# <artifactId> | <propertyTag> | <direct|nested>
-beanshell-maven-plugin     | script    | direct
-maven-enforcer-plugin      | condition | nested
-build-helper-maven-plugin  | source    | direct
+plugin/            :plugin              IntelliJ plugin -- language support and the debugger UI
+agent/instrument/  :agent:instrument    bsh-debug-agent -- premain + the ASM transformer, shaded
+agent/hook/        :agent:hook          bsh-debug-hook  -- the class instrumented BeanShell calls into
+agent/samples/     :agent:samples       debugger fixtures; nothing ships from here
+agent/checks/      --                   end-to-end agent checks, as bash scripts
+editors/           --                   VS Code extension, Neovim/Eclipse configs for the DAP transport
+docs/              repository-wide docs
 ```
 
-`direct` means the property is a direct child of `<configuration>`; `nested`
-allows it deeper (e.g. the enforcer's `<rules><evaluateBeanshell><condition>`).
+## The two pieces
 
-## Requirements & compatibility
+**The IntelliJ plugin** ([`plugin/`](plugin/README.md)) adds BeanShell language
+support to any IntelliJ-based IDE — syntax highlighting, a full AST parser, code
+completion, navigation, running `.bsh` scripts, and Maven `pom.xml` injection.
 
-- IntelliJ IDEA (or a compatible IDE) **2025.3**.
-- Optional, all wired so the plugin still loads when absent:
-  - **Java plugin** — Java navigation and the Java debug session;
-  - **XML** — Maven/XML injection;
-  - **Spellchecker** — spell-checking of comments and strings.
+**The debug agent** ([`agent/README.md`](agent/README.md)) is a JVM agent that
+instruments `bsh.Interpreter` so BeanShell scripts can be debugged at the source
+level, without modifying the script or the library that embeds it. The IntelliJ
+plugin bundles it and talks to it over a native protocol; the same agent also
+speaks DAP, so it works as a standalone debug adapter for editors that have their
+own DAP client — see [`editors/vscode/`](editors/vscode/README.md),
+[`editors/neovim/`](editors/neovim/README.md) and
+[`editors/eclipse/`](editors/eclipse/README.md).
 
-## Installation
+## Building
 
-- **From disk:** build the ZIP (see below), then in the IDE go to
-  *Settings → Plugins → ⚙ → Install Plugin from Disk…* and pick
-  `build/distributions/*.zip`. Restart when prompted.
-- **From source:** `./gradlew runIde` launches a sandbox IDE with the plugin
-  pre-installed.
-
-## Building & running
+Run from the repository root:
 
 ```bash
-./gradlew buildPlugin     # build the distributable ZIP (build/distributions)
-./gradlew runIde          # launch a sandbox IDE with the plugin
-./gradlew test            # run the test suite
+JAVA_HOME=<jdk17+> ./gradlew build              # everything, with tests
+JAVA_HOME=<jdk17+> ./gradlew :plugin:test
+./gradlew :agent:instrument:shadowJar           # the agent jar alone
 ```
 
-## Examples
+The plugin needs **JDK 17+** (Gradle refuses less) and compiles Kotlin to 21. The
+agent targets **Java 8**, because it loads into whatever JVM hosts BeanShell.
 
-- [`samples/showcase.bsh`](samples/showcase.bsh) — exercises most features and is
-  annotated with what to click (navigation, chains, debugging).
-- [`samples/demo.bsh`](samples/demo.bsh) — a smaller recursion + collection
-  example, handy for trying breakpoints and stepping.
+```bash
+./agent/checks/run-all.sh                       # the agent, end to end
+```
 
-## Screenshots
+`agent/checks/` runs what a JVM test cannot arrange from inside itself: a real
+`mvn` process, a JVM launched with `-javaagent`, and two processes talking over
+the debug socket. See [`agent/checks/README.md`](agent/checks/README.md).
 
-| | |
-|---|---|
-| ![Editor](docs/images/editor.png) | ![Completion](docs/images/completion.png) |
-| Syntax highlighting & Structure view | Code completion (keywords + in-scope names) |
-| ![Navigation](docs/images/navigation.png) | ![Debugger](docs/images/debugger.png) |
-| Quick documentation into Java on a chained member | Debugger: variables + console at a breakpoint |
-| ![Maven injection](docs/images/maven-injection.png) | ![Inspection](docs/images/inspection.png) |
-| BeanShell injected into `pom.xml` | Inspection quick-fix for an unused variable |
+## Where to read first
 
-## Known limitations
+- [`agent/README.md`](agent/README.md) — the debug agent: why an agent rather than
+  JDWP, how the transformer works, the landmines, the wire protocol.
+- [`plugin/README.md`](plugin/README.md) — the IntelliJ plugin's features,
+  requirements and installation.
+- [`plugin/docs/ARCHITECTURE.md`](plugin/docs/ARCHITECTURE.md) — the language plugin
+  (lexer, parser, PSI, resolution, completion).
+- [`plugin/docs/DEBUGGING.md`](plugin/docs/DEBUGGING.md) — the IDE side of debugging,
+  and which of the three instrumentation implementations runs.
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — the debug wire protocol, in full.
+- [`docs/FUTURE_WORK.md`](docs/FUTURE_WORK.md) — open work, ordered by what blocks
+  what.
+- [`docs/BEANSHELL-DEFECTS.md`](docs/BEANSHELL-DEFECTS.md) — upstream bugs in
+  BeanShell 2.0b6 that a debugger runs into.
 
-- The parser targets the **2.0b6** grammar; 3.0-only syntax (`**`, `??`, `<=>`,
-  triple-quoted strings, word operators such as `@gt`) is tokenized by the lexer
-  but not all of it is parsed.
-- Java navigation is **static**: it follows types that are evident in the code
-  (typed variable/parameter, `= new Type()`, class names). Generic element types,
-  array indexing and runtime-only types are not inferred.
-- On JDK 9+, BeanShell 2.0b6 cannot reflectively access some JDK-internal
-  iterators, so `list.iterator().next()` / `for (x : list)` may fail at runtime —
-  a property of the interpreter, not the plugin. Index-based iteration works.
+## License
 
-## License & credits
+Apache License 2.0 — see [`plugin/LICENSE`](plugin/LICENSE) and
+[`plugin/NOTICE`](plugin/NOTICE). BeanShell itself is developed by the
+[Apache BeanShell](https://beanshell.github.io/) project.
 
-This plugin is licensed under the [Apache License 2.0](LICENSE).
-
-BeanShell is developed by the [Apache BeanShell](https://beanshell.github.io/)
-project. This plugin bundles `org.apache-extras.beanshell:bsh:2.0b6` (also under
-the Apache License 2.0) for running and (optionally) resolving scripts; see
-[NOTICE](NOTICE) for attribution.
+[dap]: https://microsoft.github.io/debug-adapter-protocol/specification

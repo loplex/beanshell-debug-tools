@@ -1,5 +1,15 @@
 [versions]
 junit = "4.13.2"
+asm = "9.7.1"
+shadow = "9.2.2"
+# The version the hand-written lexer/parser were transcribed from. Shared by the plugin,
+# which bundles it, and the fixtures, which run against it.
+bsh = "2.0b6"
 
 [libraries]
 junit = { module = "junit:junit", version.ref = "junit" }
+asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
+bsh = { module = "org.apache-extras.beanshell:bsh", version.ref = "bsh" }
+
+[plugins]
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }

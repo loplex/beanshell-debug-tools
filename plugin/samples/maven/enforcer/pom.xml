@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Inline BeanShell inside the maven-enforcer-plugin's evaluateBeanshell rule (<condition>).
+  The condition is a BeanShell expression that must evaluate to a boolean; instrumentation
+  only prepends step() calls, so the returned value is preserved. Set a breakpoint on a
+  line below and run the "enforce" goal in Debug.
+
+  Note: unlike a plugin mojo, the evaluateBeanshell rule does NOT bind a `project` variable.
+  Reference the build via Maven interpolation (${project.version}, ${project.groupId}, ...),
+  which the enforcer expands before BeanShell sees it — hence the quoted "${...}" below.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example.bsh</groupId>
+    <artifactId>enforcer</artifactId>
+    <version>1.0.0</version>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.4.1</version>
+                <executions>
+                    <execution>
+                        <id>enforce-bsh</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <evaluateBeanshell>
+                                    <condition><![CDATA[
+                                        version = "${project.version}";
+                                        groupId = "${project.groupId}";
+                                        released = version.startsWith("1.") && groupId.length() > 0;
+                                        released
+                                    ]]></condition>
+                                </evaluateBeanshell>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

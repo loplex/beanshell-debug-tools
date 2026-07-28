@@ -1,0 +1,184 @@
+package cz.loplex.intellij.bsh
+
+import com.intellij.openapi.application.PathManager
+import com.intellij.psi.PsiErrorElement
+import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import cz.loplex.intellij.bsh.debug.BshDebugInstrumenter
+import cz.loplex.intellij.bsh.debug.CMD_EVALUATE
+import cz.loplex.intellij.bsh.debug.CMD_RESUME
+import cz.loplex.intellij.bsh.debug.CMD_SCOPES
+import cz.loplex.intellij.bsh.debug.CMD_SET_VARIABLE
+import cz.loplex.intellij.bsh.debug.CMD_VARIABLES
+import cz.loplex.intellij.bsh.debug.EVT_EVALUATED
+import cz.loplex.intellij.bsh.debug.EVT_SCOPES
+import cz.loplex.intellij.bsh.debug.EVT_STOPPED
+import cz.loplex.intellij.bsh.debug.EVT_VARIABLES
+import cz.loplex.intellij.bsh.debug.EVT_VARIABLE_SET
+import cz.loplex.intellij.bsh.debug.agent.BshDebugAgent
+import cz.loplex.intellij.bsh.psi.BshFile
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.EOFException
+import java.io.File
+import java.net.ServerSocket
+import java.util.concurrent.TimeUnit
+
+class BshDebugInstrumenterTest : BasePlatformTestCase() {
+
+    private fun instrument(text: String): String =
+        BshDebugInstrumenter.instrument(myFixture.configureByText("a.bsh", text) as BshFile)
+
+    fun testInstrumentedScriptReparsesWithoutErrors() {
+        val instrumented = instrument(
+            "x = 1;\nif (x > 0) {\n    print(x);\n}\nfor (int i = 0; i < 3; i++) { print(i); }",
+        )
+        val reparsed = myFixture.configureByText("b.bsh", instrumented)
+        assertEmpty(PsiTreeUtil.collectElementsOfType(reparsed, PsiErrorElement::class.java))
+        assertTrue(instrumented.contains("BshDebugAgent.step("))
+    }
+
+    fun testHooksArePlacedAtStatementLines() {
+        val instrumented = instrument("x = 1;\ny = 2;")
+        assertTrue(instrumented.contains(".step(1, this.namespace)"))
+        assertTrue(instrumented.contains(".step(2, this.namespace)"))
+    }
+
+    fun testHookBeforeTrailingReturnExpression() {
+        // A script ending in a bare expression (its return value, as an enforcer <condition> does)
+        // must still be instrumented and reparse cleanly.
+        val instrumented = instrument("x = 1;\nx > 0")
+        val reparsed = myFixture.configureByText("c.bsh", instrumented)
+        assertEmpty(PsiTreeUtil.collectElementsOfType(reparsed, PsiErrorElement::class.java))
+        assertTrue(instrumented.contains(".step(1, this.namespace)"))
+        assertTrue("hook before the trailing return expression", instrumented.contains(".step(2, this.namespace)"))
+    }
+
+    private data class Frame(val line: Int, val depth: Int, val vars: Map<String, String>)
+
+    /** End-to-end: instrumented script runs on real BeanShell and drives the agent over a socket. */
+    fun testInstrumentedScriptDrivesAgentOverSocket() {
+        val instrumented = instrument("int f(a) { return a + 1; }\nx = 10;\ny = f(x);\nprint(\"R=\" + y);")
+        val scriptFile = File.createTempFile("bshdbg", ".bsh").apply { writeText(instrumented); deleteOnExit() }
+
+        val agentCp = PathManager.getJarPathForClass(BshDebugAgent::class.java)
+        val bshCp = PathManager.getJarPathForClass(Class.forName("bsh.Interpreter"))
+        val classpath = agentCp + File.pathSeparator + bshCp
+        val java = File(File(System.getProperty("java.home"), "bin"), "java").absolutePath
+
+        val output = ArrayList<String>()
+        val frames = ArrayList<Frame>()
+        val refusals = ArrayList<String>()
+        ServerSocket(0).use { server ->
+            server.soTimeout = 30_000
+            val process = ProcessBuilder(
+                java, "-D${BshDebugAgent.PORT_PROPERTY}=${server.localPort}",
+                "-cp", classpath, "bsh.Interpreter", scriptFile.absolutePath,
+            ).redirectErrorStream(true).start()
+            val reader = Thread { process.inputStream.bufferedReader().forEachLine { output.add(it) } }
+                .apply { isDaemon = true; start() }
+
+            server.accept().use { socket ->
+                val input = DataInputStream(socket.getInputStream())
+                val out = DataOutputStream(socket.getOutputStream())
+                try {
+                    while (true) {
+                        assertEquals(EVT_STOPPED, input.readByte().toInt() and 0xFF)
+                        // Protocol 3 leads with the thread the stop belongs to. This path suspends
+                        // only one thread at a time, but it still reports which one, so the IDE never
+                        // has to guess.
+                        val threadId = input.readInt()
+                        assertTrue("a thread id was reported", threadId >= 1)
+                        assertTrue("the thread was named", input.readUTF().isNotEmpty())
+                        val line = input.readInt()
+                        val depth = input.readInt()
+                        // One frame from this path: a rewritten script gives the hook a NameSpace,
+                        // which does not know its caller.
+                        assertEquals(1, input.readInt())
+                        input.readUTF()
+                        input.readUTF()
+                        input.readInt()
+
+                        // Variables are pulled now, so ask the way the IDE does. Every request names
+                        // its thread and carries a request id the reply must echo back.
+                        var requestId = 1
+                        out.writeByte(CMD_SCOPES)
+                        out.writeInt(threadId)
+                        out.writeInt(requestId)
+                        out.writeInt(0)
+                        out.flush()
+                        assertEquals(EVT_SCOPES, input.readByte().toInt() and 0xFF)
+                        assertEquals("the reply echoes the request id", requestId, input.readInt())
+                        val scopes = (0 until input.readInt()).map { input.readUTF() to input.readInt() }
+
+                        val vars = LinkedHashMap<String, String>()
+                        for ((_, handle) in scopes) {
+                            requestId++
+                            out.writeByte(CMD_VARIABLES)
+                            out.writeInt(threadId)
+                            out.writeInt(requestId)
+                            out.writeInt(handle)
+                            out.flush()
+                            assertEquals(EVT_VARIABLES, input.readByte().toInt() and 0xFF)
+                            assertEquals(requestId, input.readInt())
+                            repeat(input.readInt()) {
+                                val name = input.readUTF()
+                                vars[name] = input.readUTF()
+                                input.readUTF()
+                                input.readInt()
+                            }
+                        }
+                        // This path cannot evaluate -- it is handed a NameSpace, not an Interpreter --
+                        // and the point of the assertion is that it *answers*. An opcode it does not
+                        // serve would otherwise fall through to "resume", silently letting the script
+                        // run on because the IDE asked a question. Reading EVT_* here proves it did not.
+                        requestId++
+                        out.writeByte(CMD_EVALUATE)
+                        out.writeInt(threadId)
+                        out.writeInt(requestId)
+                        out.writeInt(0)
+                        out.writeUTF("1 + 1")
+                        out.flush()
+                        assertEquals(EVT_EVALUATED, input.readByte().toInt() and 0xFF)
+                        assertEquals(requestId, input.readInt())
+                        assertFalse("evaluation refused, not answered", input.readBoolean())
+                        refusals.add(input.readUTF())
+                        input.readUTF()
+                        input.readInt()
+
+                        requestId++
+                        out.writeByte(CMD_SET_VARIABLE)
+                        out.writeInt(threadId)
+                        out.writeInt(requestId)
+                        out.writeInt(0)
+                        out.writeInt(1)
+                        out.writeUTF("y")
+                        out.writeUTF("0")
+                        out.flush()
+                        assertEquals(EVT_VARIABLE_SET, input.readByte().toInt() and 0xFF)
+                        assertEquals(requestId, input.readInt())
+                        assertFalse("assignment refused, not answered", input.readBoolean())
+                        refusals.add(input.readUTF())
+                        input.readUTF()
+                        input.readInt()
+
+                        frames.add(Frame(line, depth, vars))
+                        out.writeByte(CMD_RESUME)
+                        out.writeInt(threadId)
+                        out.flush()
+                    }
+                } catch (_: EOFException) {
+                    // script finished and closed the connection
+                }
+            }
+            process.waitFor(30, TimeUnit.SECONDS)
+            reader.join(5_000)
+        }
+
+        assertTrue("user output preserved", output.contains("R=11"))
+        assertTrue("statement lines are reported", frames.map { it.line }.containsAll(listOf(2, 3, 4)))
+        assertTrue("call depth increases inside the method", frames.maxOf { it.depth } > frames.minOf { it.depth })
+        assertEquals("variable captured", "11", frames.first { it.line == 4 }.vars["y"])
+        assertTrue("every refusal explains itself", refusals.isNotEmpty() && refusals.all { it.isNotBlank() })
+    }
+}

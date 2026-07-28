@@ -1,7 +1,11 @@
-/.gradle/
+.gradle/
 /.idea/
-/.intellijPlatform/
+*.iml
+.intellijPlatform/
+/.kotlin/
 /build/
+/plugin/build/
+/agent/*/build/
 
 /.claude/
 .DS_Store

@@ -1,0 +1,76 @@
+// The three syntactic call forms take THREE different runtime paths.
+// This is the script that proves a single AST-level hook is not enough.
+//
+//   form                     AST node             dispatcher
+//   ----------------------   ------------------   --------------------------
+//   foo(1)                   BSHMethodInvocation  Name.invokeMethod (Name.java:778)
+//   a.b.foo(1)               BSHMethodInvocation  Name.invokeMethod
+//   (expr).foo(1)            BSHPrimarySuffix     Reflect.invokeObjectMethod
+//                                                 (BSHPrimarySuffix.java:170)
+//
+// The third form never touches Name at all. BSHMethodInvocation.java:65-67
+// admits the duplication in a comment. If you hook only Name.invokeMethod you
+// will silently miss every call in the third group below.
+//
+// Common funnel underneath, covering all Java-side calls:
+//   Reflect.java:103   invokeMethod(Method, Object, Object[])
+//   Reflect.java:131   the single method.invoke() in the interpreter path
+
+print("=== 03_invocation_forms ===");
+
+// ---- group A: unqualified -> Name.invokeLocalMethod (Name.java:885) --------
+
+greet(who) {
+    return "hello " + who;              // BP:1
+}
+print(greet("A"));                      // BP:2  scripted method, unqualified
+print("len via command = " + greet("A").length());
+
+// bsh command implemented as a .bsh script in /bsh/commands.
+// pwd() prints and returns void, so step INTO it: execution leaves this file
+// and lands in the command's own .bsh source inside the jar. A debugger has to
+// decide what to show for a frame whose source is a classpath resource, not a
+// file on disk.
+pwd();                                  // BP:3  -> BshMethod.invoke, other file
+print("cwd via var = " + bsh.cwd);
+
+// bsh command implemented as a Java class (commands/dir.java):
+// Name.invokeLocalMethod -> Reflect.invokeCompiledCommand (Reflect.java:895)
+//   -> invokeStaticMethod -> invokeMethod. Uncomment to exercise; it prints a
+//   directory listing, which is noisy.
+// dir(".");
+
+// ---- group B: dotted name -> still Name.invokeMethod -----------------------
+
+obj = new java.util.ArrayList();
+obj.add("x");                           // BP:4  qualified via Name
+System.out.println("  B: size=" + obj.size());   // BP:5  static field + method
+
+// Explicit class name, static method -> Reflect.invokeStaticMethod (Reflect.java:88)
+now = java.lang.System.currentTimeMillis();      // BP:6
+print("  B: now>0 = " + (now > 0));
+
+// ---- group C: suffix on an expression -> BYPASSES Name --------------------
+// Each of these evaluates a primary expression first, then applies a .method()
+// suffix, so dispatch happens in BSHPrimarySuffix.doName, not in Name.
+
+print("  C: " + new java.util.ArrayList().size());      // BP:7  on a new-expr
+print("  C: " + ("abc" + "def").toUpperCase());         // BP:8  on a paren-expr
+print("  C: " + obj.get(0).toString());                 // BP:9  chained suffix
+print("  C: " + greet("B").substring(0, 5));            // BP:10 script call, then suffix
+
+list = new java.util.ArrayList();
+list.add("p");
+list.add("q");
+print("  C: " + list.iterator().next());                // BP:11 suffix on returned obj
+
+// Array access + method: LHS/suffix machinery, still not Name.
+names = new String[] { "one", "two" };
+print("  C: " + names[1].length());                     // BP:12
+
+// ---- bean property access: yet another route through Reflect --------------
+// Reflect.java:811 / :831 (getObjectProperty / setObjectProperty)
+sb = new java.lang.StringBuffer("hi");
+print("  props: " + sb.length());                       // BP:13
+
+print("03_invocation_forms done");

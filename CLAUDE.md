@@ -1,52 +1,81 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in this repository. User-facing docs are in
-[README.md](README.md); design detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-and [docs/DEBUGGING.md](docs/DEBUGGING.md).
+Guidance for Claude Code across this repository. This file covers the **repository
+layout and the rules that hold everywhere**; the plugin has its own
+[`plugin/CLAUDE.md`](plugin/CLAUDE.md) with the conventions specific to it.
 
-## What this is
+## Layout — one Gradle build, three subprojects
 
-An IntelliJ Platform plugin providing BeanShell (`.bsh`) language support. Kotlin,
-with one pure-Java class (the debug agent). Targets IntelliJ IDEA **2025.3**.
+The root project is a container: wrapper, version catalog, build-wide properties,
+no sources of its own.
 
-## Commands
-
-```bash
-./gradlew compileKotlin   # fast compile check
-./gradlew test            # test suite (BasePlatformTestCase + plain unit tests)
-./gradlew buildPlugin     # distributable ZIP -> build/distributions
-./gradlew runIde          # sandbox IDE (GUI)
+```
+plugin/            :plugin              IntelliJ plugin -- language support and the debugger UI
+agent/instrument/  :agent:instrument    bsh-debug-agent -- premain + the ASM transformer, shaded
+agent/hook/        :agent:hook          bsh-debug-hook  -- the class instrumented BeanShell calls into
+agent/samples/     :agent:samples       debugger fixtures; nothing ships from here
+agent/checks/      --                   end-to-end agent checks, as bash scripts
+editors/           --                   VS Code extension, Neovim/Eclipse configs for the DAP transport
+docs/              repository-wide docs
 ```
 
-## Key conventions & gotchas
+```bash
+./agent/checks/run-all.sh                       # the agent, end to end
+```
 
-- **Grammar target: BeanShell 2.0b6.** The lexer/parser are **hand-written**
-  (transcribed from `bsh.jjt`); IntelliJ can't use the JavaCC grammar directly.
-  Do not try to wire `.jjt`/`.jj` into the build.
-- **Optional integrations must not hard-depend.** Java, XML and Spellchecker are
-  wired through *optional* `<depends optional="true" config-file="...">` descriptors
-  (`bsh-java.xml`, `bsh-xml.xml`, `bsh-spellchecker.xml`) plus availability guards
-  in code (`BshJavaSupport`, class/type-id lookups). A non-optional `<depends>` on
-  a missing plugin breaks plugin loading — including in tests. Follow the existing
-  pattern.
-- **The debug agent (`debug/agent/BshDebugAgent.java`) is pure JDK.** No Kotlin,
-  IntelliJ, or compile-time BeanShell deps — it runs in the forked JVM. Keep it so.
-- **Maven inline-script list** is data, not code:
-  `src/main/resources/beanshell/maven-scripts.txt` (`artifactId | tag | direct|nested`).
-- All feature EPs are registered in `src/main/resources/META-INF/plugin.xml`.
+`agent/checks/` covers what a JVM test cannot arrange from inside itself: a real `mvn`
+process (so a real plugin realm), a JVM launched with `-javaagent`, and two processes
+talking over the debug socket. Run it after touching the agent or the wire protocol —
+[`agent/checks/README.md`](agent/checks/README.md) says what each check protects.
 
-## Testing notes
+```bash
+JAVA_HOME=<jdk17+> ./gradlew build              # everything, with tests
+JAVA_HOME=<jdk17+> ./gradlew :plugin:test
+./gradlew :agent:instrument:shadowJar           # the agent jar alone
+```
 
-- PSI/feature tests extend `BasePlatformTestCase`; pure logic (lexer, step logic)
-  uses plain JUnit.
-- Deterministic **Java resolution** tests add a real Java class with
-  `myFixture.addFileToProject("Foo.java", ...)` so `JavaPsiFacade` resolves it.
-- The **debug transport** is tested end-to-end by instrumenting a script and
-  running it through the bundled BeanShell in a subprocess, acting as the IDE over
-  a socket. Live XDebug UI is only verifiable via `runIde`.
+The plugin needs **JDK 17+** (Gradle refuses less) and compiles Kotlin to 21. The
+agent targets **Java 8**, because it loads into whatever JVM hosts BeanShell — a
+per-task `options.release`, not a build-wide property.
 
-## Package map
+**The agent is a separate subproject on purpose.** It has to stay independently
+publishable: once it speaks DAP it is a debug adapter that VS Code, Neovim or
+Eclipse can attach to, and none of them will take it out of an IntelliJ plugin ZIP.
+It does not need a second build tool to be that — a Gradle subproject has its own
+coordinates and publishes just as well.
 
-`highlight`, `editor`, `formatting`, `structure`, `navigation`, `completion`,
-`inspection`, `intention`, `findusages`, `template`, `injection`, `run`, `debug`,
-`reference` (resolution / type inference), `psi`, `lexer`, `parser`.
+## Where to read first
+
+- [`agent/README.md`](agent/README.md) — the debug agent: why an agent rather than
+  JDWP, how the transformer works, the landmines, the wire protocol. Anything about
+  the agent starts here.
+- [`plugin/docs/ARCHITECTURE.md`](plugin/docs/ARCHITECTURE.md) — the language plugin
+  (lexer, parser, PSI, resolution, completion).
+- [`plugin/docs/DEBUGGING.md`](plugin/docs/DEBUGGING.md) — the IDE side of debugging,
+  and which of the three instrumentation implementations runs.
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — the debug wire protocol, in full: framing,
+  every message, the invariants an implementation must preserve, and the configuration
+  properties. The reference for anything that touches the wire.
+- [`docs/FUTURE_WORK.md`](docs/FUTURE_WORK.md) — open work, ordered by what blocks
+  what. Read before starting anything.
+- [`editors/vscode/README.md`](editors/vscode/README.md) — the VS Code extension that drives
+  the agent's DAP transport; [`editors/neovim/`](editors/neovim/README.md) and
+  [`editors/eclipse/`](editors/eclipse/README.md) cover the same transport for those editors.
+- [`docs/BEANSHELL-DEFECTS.md`](docs/BEANSHELL-DEFECTS.md) — upstream bugs in
+  BeanShell 2.0b6 that a debugger runs into.
+
+**Two different things are called "the agent".** `agent/` is the ASM-instrumenting
+JVM agent (`cz.loplex.bsh.*`), the default mechanism. `plugin/…/debug/agent/BshDebugAgent.java`
+is the in-plugin hook class used by the *source-rewriting* fallback
+(`cz.loplex.intellij.bsh.debug.agent`). Which one is meant follows from the package.
+
+## Commit messages
+
+- **Imperative, capitalized subject, no type prefixes.** Match the existing history:
+  `Add …`, `Move …`, `Document …`. Do **not** use Conventional Commits
+  (`feat:`/`fix:`) — that only pays off with release tooling this repo doesn't have.
+- **A bugfix starts with the verb `Fix …`** (e.g. `Fix "';' expected" on a trailing
+  return expression`). That flags the fix within the same verb-first style, without a
+  `fix:` tag.
+- **No `Co-Authored-By` trailer.** The maintainer reviews and edits every commit before
+  pushing.

@@ -1,0 +1,70 @@
+// Dynamic code: where "source file + line" stops being a stable identity.
+//
+// This is the file that decides how your breakpoint identity has to work.
+//
+//   source("x.bsh")     -> nodes get sourceFile = "x.bsh". Stable, breakpointable.
+//   eval("code")        -> REPARSED on every call. sourceFile becomes
+//                          "inline evaluation of: ``code''" (see the strings in
+//                          Interpreter.eval). A fresh AST every time, so any
+//                          breakpoint keyed on a node identity is lost. Keyed on
+//                          (file, line) it still works -- but "file" is a
+//                          synthetic string that changes with the code text.
+//
+// A defined method is parsed ONCE (BshMethod.methodBody holds the BSHBlock,
+// BshMethod.java:42). eval-ed strings are not. That asymmetry is the whole
+// reason to key breakpoints on (sourceFile, line) rather than on node objects.
+//
+// Hook points exercised:
+//   Interpreter.java:659   the eval loop, re-entered per eval() call
+//   SimpleNode.java:174    getSourceFile(), which walks to the parent when unset
+
+print("=== 07_eval_and_source ===");
+
+// ---- source() a second file: nodes carry the OTHER file's name ------------
+
+source("07_aux.bsh");                   // BP:1  step into -> lands in 07_aux.bsh
+print("from aux: " + auxAdd(2, 3));     // BP:2  frame's file is 07_aux.bsh
+
+// ---- eval(String): new AST each time -------------------------------------
+
+for (i = 0; i < 3; i++) {
+    // Same source text every iteration, but a brand new parse and new nodes.
+    // Set a breakpoint on the eval'd line and see whether it survives.
+    v = eval("x = " + i + "; x * 2;");      // BP:3  reparsed 3x
+    print("  eval gave " + v);
+}
+
+// Multi-line eval: the synthetic source name gets truncated with "..." in the
+// error/position strings, so it is NOT a reliable unique key.
+code = "helper() {\n"
+     + "    return \"from evaled method\";\n"
+     + "}\n"
+     + "helper();";
+print("  " + eval(code));               // BP:4
+
+// A method DEFINED inside eval() outlives the eval. Its AST nodes report the
+// synthetic "inline evaluation of..." source, so a stack frame for it points at
+// a file that does not exist on disk. Decide now what your debugger shows here.
+eval("ghost() { return \"ghost speaking\"; }");
+print("  " + ghost());                  // BP:5  frame with a synthetic source file
+
+// ---- eval in an explicit namespace ---------------------------------------
+// This is the shape a debugger's "evaluate expression" request takes: run text
+// in the NameSpace of a chosen frame. Interpreter.eval(String, NameSpace) is
+// exactly the primitive you need, and it already exists.
+
+makeHolder() {
+    secret = 42;                        // BP:6  lives in the holder's NameSpace
+    return this;
+}
+holder = makeHolder();
+r = this.interpreter.eval("secret * 2", holder.namespace);   // BP:7
+print("  namespaced eval = " + r);
+
+// ---- getSourceFileInfo(): what the interpreter thinks it is running ------
+
+print("  sourceFileInfo = " + getSourceFileInfo());          // BP:8
+whoAmI() { return getSourceFileInfo(); }
+print("  from method    = " + whoAmI());
+
+print("07_eval_and_source done");

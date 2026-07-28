@@ -1,0 +1,159 @@
+/**
+ * Threads, scopes and introspection — the parts of the debugger that need a live IDE to judge.
+ *
+ * Open in the sandbox IDE (`./gradlew :plugin:runIde`), right-click -> Debug 'threads.bsh', and work
+ * through the five things below. Each names the line to break on and what should happen; anything
+ * else is a bug worth reporting.
+ *
+ * The automated checks in `agent/checks/` cover the wire protocol underneath all of this. What they
+ * cannot judge is the UI: whether the Threads combo is usable, whether the frame you land on is the
+ * one you expected, whether a value reads sensibly. That is what this file is for.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * 1. TWO THREADS, INDEPENDENTLY SUSPENDED          break on the line marked [1]
+ *
+ *    Both workers run that line. Stop there and the Frames panel shows one thread; the combo above
+ *    it (Threads) lists every suspended one. Let it hit a few times and two entries appear, named
+ *    after the script's own threads — "worker-A [2]", "worker-B [3]".
+ *
+ *    Switch between them: each has its own `id` and its own `i`. That is the point — the frames and
+ *    values are per thread, so one thread's loop counter never shows up under the other's stop.
+ *
+ *    Step Over on one thread does not move the other. Try it: select worker-A, Step Over twice, then
+ *    switch to worker-B and note it is still where it was.
+ *
+ * 2. SUSPEND: ALL                                  break on the line marked [2]
+ *
+ *    Right-click that breakpoint -> Suspend: All (IntelliJ's own breakpoint setting; there is no
+ *    setting of ours involved). Only `slowCounter` runs that line, so under the default
+ *    Suspend: Thread the workers keep going. With Suspend: All they are rounded up too, and appear
+ *    in the Threads combo stopped on lines that have no breakpoint at all.
+ *
+ *    Note what it cannot do, and why it is honest about it: a thread is only ever stopped where it
+ *    calls into the debugger, so one sitting in Thread.sleep() keeps sleeping until it wakes. The
+ *    round-up is "everyone stops at their next statement", not "everyone stops now".
+ *
+ * 3. GLOBAL SCOPE                                  break on the line marked [3]
+ *
+ *    Stopped inside a method, the Variables panel shows two scopes: Locals and Global. `total` and
+ *    `startedAt` live in Global — the script's own top level — and would be invisible if only the
+ *    method's locals were shown.
+ *
+ * 4. A CLOSURE'S CAPTURED SCOPE                    break on the line marked [4]
+ *
+ *    `counter` here is a bsh.This: BeanShell's handle on a namespace. Expand it and you see what the
+ *    closure captured (`n`, and `bump` itself), not the Java fields of bsh.XThis. Then evaluate
+ *    `counter.bump()` in the Evaluate dialog (Alt+F8) and watch `n` change.
+ *
+ * 5. A SCRIPTED CLASS INSTANCE                     break on the line marked [5]
+ *
+ *    Expand `point`. Among its fields is `_bshThisPoint`, BeanShell's back-reference to the
+ *    instance's namespace — kept on purpose rather than filtered out, because it is the one place the
+ *    script's own view of the object is visible. Expand it and you get the instance's scope.
+ *
+ *    Also try Set Value on `point.x` (F2), and a watch on `point.getX() * 2`.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * A DELIBERATE BUG, since a debugger demo may as well debug something. `total` is incremented by
+ * both workers without any synchronisation, so the printed total comes out below 16 — the two
+ * threads read the same value and write it back.
+ *
+ * It is also a textbook Heisenbug: run it under the debugger and the total often comes out correct,
+ * because stopping the threads serialises the very interleaving that caused it. That makes it a
+ * better exercise, not a worse one — break on [1] with Suspend: All, let both threads pile up there,
+ * and step them one at a time in the order that reproduces the lost update deliberately.
+ * ---------------------------------------------------------------------------------------------
+ */
+
+// Global state, for [3]. Deliberately at top level: this is what the Global scope shows.
+total = 0;
+startedAt = System.currentTimeMillis();
+
+// --- 1. Two worker threads, each with its own state ---------------------------------------
+
+worker(id) {
+    run() {
+        for (i = 0; i < 8; i++) {
+            step = id + "-" + i;                     // [1] break here: two threads, own `i` and `id`
+            total = total + 1;                       //     a shared global, written from both
+            Thread.sleep(40);
+        }
+        return null;
+    }
+    return this;
+}
+
+// --- 2. A third thread on a line of its own, for Suspend: All -----------------------------
+
+slowCounter() {
+    run() {
+        for (k = 0; k < 6; k++) {
+            tick = "tick-" + k;                      // [2] break here, then set Suspend: All
+            Thread.sleep(60);
+        }
+        return null;
+    }
+    return this;
+}
+
+// --- 3. A method, so there is a frame whose locals are not the globals --------------------
+
+summarise(count) {
+    average = count > 0 ? total / count : 0;
+    label = "after " + count + " rounds";            // [3] break here: Locals vs Global
+    return label + ", average " + average;
+}
+
+// --- 4. A closure that captures its own scope --------------------------------------------
+
+makeCounter(start) {
+    n = start;
+    bump() {
+        n = n + 1;
+        return n;
+    }
+    return this;                                     // `this` is the namespace, captured
+}
+
+// --- 5. A class declared in the script ---------------------------------------------------
+
+class Point {
+    int x;
+    int y;
+
+    Point(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    int getX() {
+        return x;
+    }
+
+    public String toString() {
+        return "Point(" + x + ", " + y + ")";
+    }
+}
+
+// --- run it ------------------------------------------------------------------------------
+
+ta = new Thread((Runnable) worker("A"), "worker-A");
+tb = new Thread((Runnable) worker("B"), "worker-B");
+tc = new Thread((Runnable) slowCounter(), "slow-counter");
+ta.start();
+tb.start();
+tc.start();
+ta.join();
+tb.join();
+tc.join();
+
+counter = makeCounter(10);
+counter.bump();
+print("counter after one bump = " + counter.bump());  // [4] break here: expand `counter`
+
+point = new Point(3, 4);
+print("point = " + point + ", getX() = " + point.getX());  // [5] break here: expand `point`
+
+print(summarise(8));
+print("total = " + total + ", elapsed = " + (System.currentTimeMillis() - startedAt) + "ms");
+print("threads.bsh done");

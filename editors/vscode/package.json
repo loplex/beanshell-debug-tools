@@ -1,0 +1,183 @@
+{
+  "name": "bsh-debug",
+  "displayName": "BeanShell Debug",
+  "description": "Debug BeanShell scripts by attaching to (or launching) the bsh-plugin debug agent's DAP transport.",
+  "version": "0.1.0",
+  "publisher": "loplex",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/loplex/intellij-beanshell.git"
+  },
+  "activationEvents": [
+    "onDebug"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "beanshell",
+        "aliases": [
+          "BeanShell"
+        ],
+        "extensions": [
+          ".bsh"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "beanshell"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "bsh",
+        "label": "BeanShell",
+        "languages": [
+          "beanshell"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "script",
+              "agentJar",
+              "classpath"
+            ],
+            "properties": {
+              "script": {
+                "type": "string",
+                "description": "Path to the .bsh script to run."
+              },
+              "javaExecutable": {
+                "type": "string",
+                "description": "Path to the java executable.",
+                "default": "java"
+              },
+              "agentJar": {
+                "type": "string",
+                "description": "Path to bsh-debug-agent-*.jar, built with ./gradlew :agent:instrument:shadowJar."
+              },
+              "classpath": {
+                "type": [
+                  "string",
+                  "array"
+                ],
+                "description": "Classpath for bsh.Interpreter, including the BeanShell jar. A string or an array of entries."
+              },
+              "port": {
+                "type": "number",
+                "description": "Port the agent should listen on. Left unset, a free port is chosen automatically."
+              },
+              "sources": {
+                "type": "string",
+                "description": "Comma-separated source file name suffixes to report on (bsh.debug.sources). Defaults to the script's own file name."
+              },
+              "sourcesFile": {
+                "type": "string",
+                "description": "Path to a file of source-name prefixes (bsh.debug.sources.file), for a script evaluated from a string rather than a file."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments passed to the script."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory for the launched JVM. Defaults to the script's own directory."
+              },
+              "env": {
+                "type": "object",
+                "description": "Extra environment variables for the launched JVM."
+              },
+              "vmArgs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Extra JVM arguments, e.g. -Dbsh.debug.trace=true."
+              }
+            }
+          },
+          "attach": {
+            "required": [
+              "port"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Host the agent is listening on.",
+                "default": "127.0.0.1"
+              },
+              "port": {
+                "type": "number",
+                "description": "The port bsh.debug.listen was set to on the target JVM."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "bsh",
+            "request": "attach",
+            "name": "BeanShell: Attach",
+            "host": "127.0.0.1",
+            "port": 4711
+          },
+          {
+            "type": "bsh",
+            "request": "launch",
+            "name": "BeanShell: Launch",
+            "script": "${workspaceFolder}/script.bsh",
+            "agentJar": "/path/to/bsh-debug-agent-1.0.0-SNAPSHOT.jar",
+            "classpath": "/path/to/bsh-2.0b6.jar"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "BeanShell: Attach",
+            "description": "Attach to a script already running with -Dbsh.debug.protocol=dap -Dbsh.debug.listen=<port>",
+            "body": {
+              "type": "bsh",
+              "request": "attach",
+              "name": "BeanShell: Attach",
+              "host": "127.0.0.1",
+              "port": "^\"\\${1:4711}\""
+            }
+          },
+          {
+            "label": "BeanShell: Launch",
+            "description": "Launch a .bsh script under the debug agent",
+            "body": {
+              "type": "bsh",
+              "request": "launch",
+              "name": "BeanShell: Launch",
+              "script": "^\"\\${1:\\${workspaceFolder}/script.bsh}\"",
+              "agentJar": "^\"\\${2:/path/to/bsh-debug-agent.jar}\"",
+              "classpath": "^\"\\${3:/path/to/bsh-2.0b6.jar}\""
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.4.0"
+  }
+}

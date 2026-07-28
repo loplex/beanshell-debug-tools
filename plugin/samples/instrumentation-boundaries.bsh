@@ -1,0 +1,183 @@
+// Where a debug hook may and may not be inserted.
+//
+// demo.bsh and showcase.bsh are written so plainly that every line qualifies,
+// which makes them useless for telling a working instrumenter from one that
+// simply prefixes every line. This script is the opposite: it deliberately mixes
+// legal and illegal positions, so an instrumenter that gets it wrong either
+// fails to parse or changes what the script does.
+//
+// Every line is marked:
+//
+//   HOOK           a statement boundary -- both implementations act here
+//   NO-HOOK        inserting here would detach the following statement or break
+//                  an expression in half; neither implementation may act
+//   REWRITE-ONLY   the line-based rewriter legally inserts here, but the hook
+//                  attaches to the END of the preceding block and then reports
+//                  this line, which is not where execution actually is. The
+//                  agent reports nothing, as no AST node starts on the line.
+//                  Verified by observing that `probe(1); } catch (e) {` runs
+//                  probe() as the try block's last statement.
+//   AGENT-ONLY     a genuine statement the agent can stop on, where the rewriter
+//                  must NOT insert: prefixing a brace-less body would leave the
+//                  `if`/`while`/`for` governing the hook instead of the body, so
+//                  the body would run unconditionally.
+//
+// The last two categories are the point of the file. They are not rough edges to
+// be tidied away -- they are the measurable difference between rewriting a script
+// and instrumenting the interpreter, in both directions.
+//
+// The markers are machine-checked, so they cannot quietly rot:
+//
+//   ./tools/check-instrumentation.py                    # the rewriter
+//   ./tools/check-instrumentation.py --target agent     # the agent
+//
+// The script also runs on its own and prints its own expected output as the next
+// line, so a wrongly instrumented copy is easy to spot even by eye: it either
+// throws a parse error or prints different numbers.
+//
+// Note that the agent is checked against *executed* statements, so a line inside
+// a branch this script never takes cannot be verified that way -- which is why
+// every marked line here is on a path that actually runs, except the `case 1:`
+// branch left in deliberately as the counter-example.
+
+log = "";
+note(s) { log = log + s + " "; }                        // HOOK
+
+// ---- brace-less bodies: the classic trap ---------------------------------
+// A hook before the body would leave `if (...)` governing the hook instead of the
+// body, so the body would run unconditionally -- never legal for the rewriter.
+// The agent has no such problem: it reports the body node without moving any
+// text, which is why these come out AGENT-ONLY.
+
+t = true;                                               // HOOK
+f = false;                                              // HOOK
+
+if (t) note("if-taken");                                // HOOK (the `if`), NO-HOOK (the body)
+if (f) note("NEVER");                                   // HOOK (the `if`), NO-HOOK (the body)
+
+// Split across lines: the body is on its own line and still brace-less.
+if (t)
+    note("if-split");                                   // AGENT-ONLY
+
+if (f)
+    note("NEVER");                                      // AGENT-ONLY
+else
+    note("else-split");                                 // AGENT-ONLY
+
+// Braced versions of the same thing: now the body IS a block, so its statements
+// are ordinary statement boundaries.
+if (t) {
+    note("if-braced");                                  // HOOK
+}
+
+n = 0;                                                  // HOOK
+while (n < 2) n++;                                      // HOOK (the `while`), NO-HOOK (the body)
+note("while=" + n);                                     // HOOK
+
+m = 0;                                                  // HOOK
+do m++; while (m < 3);                                  // HOOK (the `do`), NO-HOOK (the body)
+note("do=" + m);                                        // HOOK
+
+for (i = 0; i < 2; i++) note("for" + i);                // HOOK (the `for`), NO-HOOK (the body)
+
+// The for header is not a statement position either: a hook between the `;`
+// parts would not parse at all.
+for (j = 0; j < 2; j++) {
+    note("forbody" + j);                                // HOOK
+}
+
+items = new int[] { 7, 8 };                             // HOOK
+for (x : items) note("each" + x);                       // HOOK (the `for`), NO-HOOK (the body)
+
+// ---- expressions spanning several lines ----------------------------------
+// Only the first line of a statement is a boundary. The continuation lines are
+// in the middle of an expression, so a hook there splits it.
+
+total = 1
+      + 2                                               // NO-HOOK -- mid-expression
+      + 3;                                              // NO-HOOK -- mid-expression
+note("total=" + total);                                 // HOOK
+
+label = "a"
+    + "b";                                              // NO-HOOK -- mid-expression
+note("label=" + label);                                 // HOOK
+
+// A multi-line argument list is the same case.
+joined = "" + note(
+    "argline"                                           // NO-HOOK -- inside an argument list
+);
+
+// ---- declarations --------------------------------------------------------
+// A method or class body is a block, so statements inside it are boundaries --
+// including what looks like a field declaration, because BeanShell evaluates a
+// class body as a block rather than as a set of Java member declarations.
+
+twice(v) {                                              // HOOK (the declaration)
+    return v * 2;                                       // HOOK
+}
+note("twice=" + twice(21));                             // HOOK
+
+class Holder {                                          // HOOK (the declaration)
+    int value;                                          // HOOK -- a class body is a block,
+                                                        //         so this is a statement in it
+    public Holder(int v) {
+        this.value = v;                                 // HOOK
+    }
+    public int get() {
+        return this.value;                              // HOOK
+    }
+}
+h = new Holder(5);                                      // HOOK
+note("holder=" + h.get());                              // HOOK
+
+// ---- switch --------------------------------------------------------------
+// A label is not a statement, but the rewriter can still insert before one: the
+// hook simply joins the END of the previous case's fall-through code. Legal, and
+// reported against a line where execution is not, hence REWRITE-ONLY.
+
+k = 2;                                                  // HOOK
+switch (k) {                                            // HOOK (the `switch`)
+    case 1:                                             // NO-HOOK -- the FIRST label
+                                                        //    has no preceding statement
+                                                        //    to attach a hook to
+        note("one");                                    // HOOK
+        break;                                          // HOOK
+    case 2:                                             // REWRITE-ONLY
+        note("two");                                    // HOOK
+        break;                                          // HOOK
+    default:                                            // REWRITE-ONLY
+        note("other");                                  // HOOK
+}
+
+// ---- try / catch / finally ----------------------------------------------
+// The blocks are ordinary blocks. A `} catch (e) {` line is not a statement, yet
+// the rewriter may insert before it -- the hook becomes the try block's last
+// statement while reporting the catch line. Legal, misleading, REWRITE-ONLY.
+
+try {                                                   // HOOK (the `try`)
+    throw new RuntimeException("boom");                 // HOOK
+} catch (e) {                                           // REWRITE-ONLY
+    note("caught");                                     // HOOK
+} finally {                                             // REWRITE-ONLY
+    note("finally");                                    // HOOK
+}
+
+// ---- several statements on one line -------------------------------------
+// One line, three boundaries. An instrumenter working per line can only hook
+// the first of them, which is correct but worth seeing.
+
+p = 1; q = 2; note("pq=" + (p + q));                    // HOOK (first statement only)
+
+// ---- empty statement and bare block -------------------------------------
+;                                                       // REWRITE-ONLY -- EmptyStatement()
+                                                        //    has no #Node in the grammar,
+                                                        //    so the agent cannot report it
+{
+    inner = "block";                                    // HOOK
+    note(inner);                                        // HOOK
+}
+
+print("boundaries: " + log);
+print("expected  : if-taken if-split else-split if-braced while=2 do=3 for0 for1"
+    + " forbody0 forbody1 each7 each8 total=6 label=ab argline twice=42 holder=5"
+    + " two caught finally pq=3 block");

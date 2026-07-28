@@ -44,8 +44,8 @@ declare -a bshLibMvnCoordinates=( 'org.apache-extras.beanshell' 'bsh' '2.0b6' )
 #declare -a bshLibMvnCoordinates=( 'org.beanshell'               'bsh' '2.0b4' )
 #declare -a bshLibMvnCoordinates=( 'bsh'                         'bsh' '2.0b1' )
 
-# BshDebugAgent, compiled into `build/` by `./gradlew :plugin:compileJava`.
-declare agent_classes_dir="${repo}/build/classes/java/main"
+# BshDebugAgent, compiled into `plugin/build/` by `./gradlew :plugin:compileJava`.
+declare agent_classes_dir="${repo}/plugin/build/classes/java/main"
 declare agent_class='cz.loplex.intellij.bsh.debug.agent.BshDebugAgent'
 
 

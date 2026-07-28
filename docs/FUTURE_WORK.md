@@ -101,15 +101,6 @@ debuggee itself.
 
 ## Smaller, independent
 
-### Non-zero exit from `tools/run-debug-bsh.sh` on script errors
-
-`bsh.Interpreter` prints a "Target exception" but still exits `0` when a script
-fails to evaluate (the connect-failure case is already handled — the agent calls
-`System.exit(69)`). For the command-line tools it would be nicer if a failing
-script produced a non-zero exit, so callers/CI can detect it. A wrapper-level
-concern (parse the interpreter's output, or run the script via a small launcher
-that propagates eval errors), not an agent change.
-
 ### (Optional) Second JDWP channel for step-into Java
 
 The original inline-debug plan left one optional item unimplemented: a second,

@@ -93,10 +93,36 @@ fi
 
 # Create temporary file where to put the instrumented script, kept after the run for possible inspection.
 instrumented=$( mktemp --suffix='.bsh' )
+runner_dir=$( dirname "${instrumented}" )
 
 # Instrument input script on STDIN and writes the enriched script to temporary file.
 dbgExec "${here}/bshInstrumenter.main.kts" > "${instrumented}"
 echo "Instrumented script: ${instrumented}" >&2
 
+# bsh.Interpreter's own main() catches a failing script's EvalError/TargetError, prints it and
+# returns -- it never exits non-zero, so a caller (CI included) cannot tell success from failure.
+# BshRunner makes the same source() call main() does but turns that same exception into exit(1).
+cat > "${runner_dir}/BshRunner.java" <<'EOF'
+import bsh.EvalError;
+import bsh.Interpreter;
+import bsh.TargetError;
+
+public final class BshRunner {
+    public static void main(String[] args) throws Exception {
+        Interpreter interpreter = new Interpreter();
+        try {
+            interpreter.source(args[0], interpreter.getNameSpace());
+        } catch (TargetError e) {
+            System.err.println("Script threw exception: " + e);
+            System.exit(1);
+        } catch (EvalError e) {
+            System.err.println("Evaluation Error: " + e);
+            System.exit(1);
+        }
+    }
+}
+EOF
+dbgExec javac -cp "${bsh_jar}" -d "${runner_dir}" "${runner_dir}/BshRunner.java"
+
 # Run instrumented script in BeanShell interpreter with BshDebugAgent on classpath.
-dbgExec exec java -cp "${agent_classes_dir}:${bsh_jar}" "${portArgs[@]}" 'bsh.Interpreter' "${instrumented}"
+dbgExec exec java -cp "${agent_classes_dir}:${bsh_jar}:${runner_dir}" "${portArgs[@]}" 'BshRunner' "${instrumented}"

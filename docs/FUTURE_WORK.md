@@ -101,12 +101,26 @@ debuggee itself.
 
 ## Smaller, independent
 
-### (Optional) Second JDWP channel for step-into Java
+### Second JDWP channel for step-into Java — already works, no code needed
 
-The original inline-debug plan left one optional item unimplemented: a second,
-JDWP-based debug channel (reuse `BshJavaDebugAttach`) so the developer can step
-*into* the Java code a Maven-run script calls, in addition to line-stepping the
-script itself. Independent of the script-level transport; purely additive.
+The original inline-debug plan left this as an optional item: a second, JDWP-based
+debug channel (reuse `BshJavaDebugAttach`) so the developer can step *into* the Java
+code a Maven-run script calls, in addition to line-stepping the script itself.
+
+It turns out there is nothing to build. `BshMavenRunConfiguration` extends
+`MavenRunConfiguration` and only augments `getState()` before delegating to the
+super implementation, so the Debug executor wraps the forked Maven JVM in JDWP the
+same way it would for any Maven run — the Java debug tab "appears for free", as the
+class doc on `BshMavenRunConfiguration` already said. Verified by hand on
+2026-07-29 in `./gradlew :plugin:runIde`: running `plugin/samples/maven/build-helper`'s
+`bsh-property` goal under Debug opened both a `BeanShell (Maven)` session and a
+`build-helper [install] (bsh)` Java session, and a breakpoint in `java.lang.String.length()`
+(reached from the inline script's `project.getVersion().length()`) was actually hit,
+not just a tab that appeared and did nothing.
+
+`BshJavaDebugAttach` and the manual `-agentlib:jdwp` wiring in `BshDebugRunner.kt`
+remain necessary for the standalone `.bsh` path, which runs a raw `GeneralCommandLine`
+outside the platform's own Java-debugging support and so gets nothing "for free".
 
 ### End-to-end GUI test for the VS Code extension — done
 

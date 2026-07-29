@@ -1,0 +1,11 @@
+// Same fixture as agent/checks/07-dap-transport.sh, editors/vscode's test and editors/neovim's
+// test (same breakpoint line and evaluate expression) -- walked through by hand here instead, per
+// the manual verification runbook in ../README.md#manual-verification-runbook.
+total = 0;
+compute(n) {
+    doubled = n * 2;
+    return doubled + total;
+}
+total = 5;
+print("result=" + compute(7));
+print("script done");

@@ -52,3 +52,44 @@ for the exact fields the launcher dialog exposes in your version.
 Same limits as the agent everywhere else, declared in its DAP capabilities rather than silently
 ignored: no pause (a BeanShell thread only stops where it calls the hook, so there is nothing to
 interrupt), no conditional/function/exception breakpoints, no step-back, no restart-frame.
+
+## Manual verification runbook
+
+Unlike [`../vscode/`](../vscode/#testing) and [`../neovim/`](../neovim/#testing), there is no
+automated end-to-end test here. Both of those cover code this repository owns — the extension's
+own JVM launch, `bsh-dap.lua`'s own launch — that a hand-rolled DAP client can't exercise. There
+is no equivalent here: this package is a README, not a launcher, and LSP4E's generic Debug
+Adapter launch configuration (configured entirely through its own UI dialog) is upstream code
+this repository doesn't own. Automating it would mean standing up a second build toolchain
+(Tycho, a p2 target platform, SWTBot) to re-verify that *LSP4E* speaks DAP correctly against this
+agent — already proven, against the same agent, by
+[`agent/checks/07-dap-transport.sh`](../../agent/checks/07-dap-transport.sh)'s `dap-client.py`.
+
+What's worth checking by hand — after touching the agent, the DAP transport, or this doc — is
+that LSP4E's *own* attach flow still holds up end to end, using
+[`samples/script.bsh`](samples/script.bsh) (the same fixture, breakpoint line and evaluate
+expression `07` and the other two editors' tests already prove work):
+
+1. Resolve the agent jar and classpath: `./gradlew -q :agent:samples:printPaths` from the
+   repository root, giving `AGENT_JAR` and `BSH_CLASSPATH`.
+2. Start the target JVM (see [step 1](#1-start-the-target-jvm) above), pointed at
+   `samples/script.bsh`, and confirm it blocks on `DAP: listening on 127.0.0.1:4711, waiting for
+   a client to attach` before doing anything else.
+3. In Eclipse, open `samples/script.bsh` and set a line breakpoint on
+   `return doubled + total;` (line 6).
+4. Create or reuse the **Debug Adapter** launch configuration (see
+   [step 2](#2-create-the-launch-configuration) above) and launch it.
+5. Confirm, in that order:
+   - execution stops inside `compute()`, with the caller frame (`compute(7)` in `global`) also
+     visible in the call stack — not just the innermost frame;
+   - the Variables view offers both a **Locals** scope (`n = 7`, then `doubled = 14` once past
+     the assignment) and a **Global** scope (`total = 5`);
+   - evaluating `doubled + 1` (Display/Expressions view) returns `15`;
+   - resuming lets the script run to completion (`script done` on the target JVM's stdout) —
+     and, since `DapChannel` never sends a `terminated`/`exited` DAP event, watch what LSP4E
+     itself does when the socket merely drops: whether the Debug view marks the session
+     terminated on its own or is left stuck, since that is LSP4E's behaviour to characterize, not
+     this agent's to fix.
+
+A step that stops holding is a regression in the DAP transport itself — cross-check against `07`
+and the VS Code/Neovim tests before assuming it's LSP4E's own behaviour that changed.

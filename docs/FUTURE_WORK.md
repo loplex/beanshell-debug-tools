@@ -191,13 +191,26 @@ commit since the project carries no version tags — this test only exercises `b
 through it and vendors none of its code. Documented in
 [`editors/neovim/README.md`](../editors/neovim/README.md#testing).
 
-### End-to-end GUI test for Eclipse
+### End-to-end GUI test for Eclipse — decided: a manual runbook instead
 
-Eclipse's generic DAP client has no headless, scriptable entry point equivalent to
-`vscode.debug.startDebugging()` or `nvim-dap`'s `dap.run()` — an end-to-end test there would mean
-SWTBot or similar driving real windows, for less differentiated coverage, since
-[`editors/eclipse/`](../editors/eclipse/README.md) is already attach-only and so exercises less
-of the extension-specific code the other two GUI tests caught real bugs in.
+Unlike VS Code and Neovim, [`editors/eclipse/`](../editors/eclipse/README.md) has no code of its
+own to regress — it is a README, not a launcher; LSP4E's generic Debug Adapter launch
+configuration is upstream code, configured entirely through its own UI dialog, and it is also
+attach-only, so there is no launch step of ours to get wrong either. Automating it would mean
+standing up a second build toolchain (Tycho, a p2 target platform, SWTBot — LSP4E ships via p2,
+not Maven Central, so it can't join this Gradle build the lightweight way) just to re-verify that
+*LSP4E* speaks DAP correctly against this agent, which
+[`agent/checks/07-dap-transport.sh`](../agent/checks/07-dap-transport.sh)'s `dap-client.py`
+already proves. Not worth a second build toolchain for coverage of code this repository doesn't
+own.
+
+What replaced it: [`editors/eclipse/README.md#manual-verification-runbook`](../editors/eclipse/README.md#manual-verification-runbook)
+is a step-by-step checklist against the same shared fixture (now at
+[`editors/eclipse/samples/script.bsh`](../editors/eclipse/samples/script.bsh)) — same breakpoint
+line, same evaluate expression as `07` and the other two editors' tests — to run by hand after
+touching the agent or the DAP transport, including the one thing worth watching that only shows
+up against a real LSP4E session: what it does when `DapChannel` drops the socket instead of
+sending a `terminated` event.
 
 ### GitHub Actions for builds — done
 

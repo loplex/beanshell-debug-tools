@@ -35,11 +35,11 @@ MAVEN_OPTS="-javaagent:$AGENT_JAR -Dbsh.debug.trace=1" \
 grep 'bsh-agent' "$CHECK_TMP/bh.txt" > "$CHECK_TMP/bh-agent.txt" || true
 
 assert_contains "$CHECK_TMP/bh-agent.txt" 'src=inline evaluation of: ``prefix = project.getArtifactId();' \
-    "build-helper: the inline <source> is instrumented inside the plugin realm"
+    "build-helper: the inline <source> is instrumented inside the plugin realm" "$CHECK_TMP/bh.txt"
 assert_contains "$CHECK_TMP/bh-agent.txt" 'line=1 src=inline evaluation of' \
-    "build-helper: lines are snippet-relative (first statement is line 1)"
+    "build-helper: lines are snippet-relative (first statement is line 1)" "$CHECK_TMP/bh.txt"
 assert_contains "$CHECK_TMP/bh-agent.txt" 'line=3 src=inline evaluation of' \
-    "build-helper: the third statement reports line 3"
+    "build-helper: the third statement reports line 3" "$CHECK_TMP/bh.txt"
 
 # --- the source-prefix filter -----------------------------------------------------------------
 #
@@ -60,7 +60,7 @@ MAVEN_OPTS="-javaagent:$AGENT_JAR -Dbsh.debug.trace=1 -Dbsh.debug.sources.file=$
 grep 'bsh-agent' "$CHECK_TMP/filtered.txt" > "$CHECK_TMP/filtered-agent.txt" || true
 
 assert_contains "$CHECK_TMP/filtered-agent.txt" 'src=inline evaluation of' \
-    "filter: a prefix computed by the production rule still matches the script"
+    "filter: a prefix computed by the production rule still matches the script" "$CHECK_TMP/filtered.txt"
 assert_not_contains "$CHECK_TMP/filtered-agent.txt" 'print.bsh' \
     "filter: BeanShell's own print.bsh is excluded"
 
@@ -83,7 +83,7 @@ if [[ -f "$ENFORCER" ]]; then
         mvn -o -q -f "$ENFORCER" validate > "$CHECK_TMP/enf.txt" 2>&1
     grep 'bsh-agent' "$CHECK_TMP/enf.txt" > "$CHECK_TMP/enf-agent.txt" || true
     assert_contains "$CHECK_TMP/enf-agent.txt" 'src=inline evaluation of' \
-        "enforcer: the inline <condition> is instrumented too"
+        "enforcer: the inline <condition> is instrumented too" "$CHECK_TMP/enf.txt"
 else
     printf '  \033[33mNOTE\033[0m no enforcer sample at %s, skipping that half\n' "$ENFORCER"
 fi

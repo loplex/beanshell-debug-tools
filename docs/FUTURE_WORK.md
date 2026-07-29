@@ -179,10 +179,10 @@ SWTBot or similar driving real windows, for less differentiated coverage, since
 [`editors/eclipse/`](../editors/eclipse/README.md) is already attach-only and so exercises less
 of the extension-specific code the VS Code test caught its bug in.
 
-### GitHub Actions for builds
+### GitHub Actions for builds — done
 
-No CI yet — `./gradlew build` and `agent/checks/run-all.sh` only run when someone remembers to
-run them locally. Both need nothing exotic: JDK 17+ (21 to match what Kotlin compiles to), and
-for the checks, `mvn` and `python3` — all present on GitHub's `ubuntu-latest` image. The VS Code
-extension's own `npm test` (Xvfb + Electron) is a separate job at least, since it needs a virtual
-framebuffer and the Wayland-avoidance fix already in `runTest.ts`.
+`.github/workflows/ci.yml` runs `./gradlew build` and `agent/checks/run-all.sh` on every push and
+pull request, on `ubuntu-latest` with JDK 21 — nothing exotic needed since `mvn` and `python3` are
+already on the image. The VS Code and Neovim extension tests (Xvfb + Electron, and `nvim -l`) are
+not wired into CI yet — each needs its own runner setup (a display for the former, `nvim` and
+`git` on `PATH` for the latter) and is left for a follow-up job.

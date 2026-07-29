@@ -1,0 +1,10 @@
+// Same fixture as agent/checks/07-dap-transport.sh and editors/vscode's test (same breakpoint
+// line and evaluate expression), proven here through a real nvim-dap session instead.
+total = 0;
+compute(n) {
+    doubled = n * 2;
+    return doubled + total;
+}
+total = 5;
+print("result=" + compute(7));
+print("script done");

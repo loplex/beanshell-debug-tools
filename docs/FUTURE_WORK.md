@@ -162,22 +162,42 @@ Run with `npm test` (`xvfb-run -a npm test` headless); resolves `AGENT_JAR`/`BSH
 through the same `:agent:samples:printPaths` Gradle task `agent/checks/lib.sh` uses. Documented
 in [`editors/vscode/README.md`](../editors/vscode/README.md#testing).
 
-### End-to-end GUI tests for Neovim and Eclipse
+### End-to-end GUI test for Neovim — done
 
-VS Code has one now (above); Neovim and Eclipse still only get the manual
-`agent/checks/07-dap-transport.sh` / `dap-client.py` coverage, which speaks the protocol but
-is not a real client. That distinction is exactly what made the VS Code test worth writing:
-its one real finding — `DapChannel` never sends a `terminated`/`exited` DAP event — came from
-using `vscode.debug.startDebugging()` instead of a hand-rolled script, and there is no reason
-the same class of gap couldn't exist in either editor's own session bookkeeping instead.
+`editors/neovim/tests/` drives `bsh-dap.lua` through a real, headless `nvim-dap` session
+(`nvim --headless -l`, no display server needed) against the same fixture, breakpoint line and
+evaluate expression `agent/checks/07-dap-transport.sh` and the VS Code test already prove work
+over `DapChannel` — deliberately, for the same reason the VS Code fixture matches `07`'s: so the
+three checks are provably exercising the same behaviour, not three fixtures that could drift.
+Covers what `07`'s `dap-client.py` cannot: `bsh-dap.lua`'s own `launch()` (the `jobstart` spawn,
+the `DAP: listening` stdout watch), the Neovim counterpart to what the VS Code GUI test found for
+`BshDebugAdapterDescriptorFactory.launch()`.
 
-Neovim is the more tractable of the two: `nvim --headless` plus a Lua test runner (`plenary.nvim`
-or a plain `nvim -l` script) can drive `nvim-dap` the same way the VS Code test drives
-`vscode.debug.startDebugging()`, with no display server needed. Eclipse's generic DAP client has
-no headless, scriptable entry point equivalent to that call — an end-to-end test there would mean
+**No test framework needed.** `nvim -l` (a Lua-script entry point, not `-c`/`-u` sourcing) gets
+the full API in headless mode, and `Session:request()` takes a plain callback — so the whole test
+is `vim.wait()` polling a `done` flag per request, the same style nvim-dap's own test suite
+(`spec/helpers.lua`) uses, rather than plenary or a coroutine wrapper.
+
+**`dap.listeners.on_session` closes the same race the VS Code test's `on_close` finding warns
+about.** It fires the moment `dap.run()` creates the session object, before the session has even
+connected — attaching `session.on_close[...]` there, rather than after some later step, is what
+makes the close-detection reliable rather than occasionally racing the connection tearing down
+first. Confirms, on the Neovim side, what the VS Code test found on its: `DapChannel` never sends
+a `terminated`/`exited` DAP event, so both clients only learn a session is over from a dropped
+socket (`Session:close()`'s `on_close` here, `onDidTerminateDebugSession` there).
+
+`nvim-dap` is fetched by `tests/run-tests.sh` into `tests/.deps/` (gitignored), pinned to a fixed
+commit since the project carries no version tags — this test only exercises `bsh-dap.lua`
+through it and vendors none of its code. Documented in
+[`editors/neovim/README.md`](../editors/neovim/README.md#testing).
+
+### End-to-end GUI test for Eclipse
+
+Eclipse's generic DAP client has no headless, scriptable entry point equivalent to
+`vscode.debug.startDebugging()` or `nvim-dap`'s `dap.run()` — an end-to-end test there would mean
 SWTBot or similar driving real windows, for less differentiated coverage, since
 [`editors/eclipse/`](../editors/eclipse/README.md) is already attach-only and so exercises less
-of the extension-specific code the VS Code test caught its bug in.
+of the extension-specific code the other two GUI tests caught real bugs in.
 
 ### GitHub Actions for builds — done
 

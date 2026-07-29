@@ -138,6 +138,14 @@ breakpoints, script variables) and a **Java** session (breakpoints in the Java
 code the script invokes). Without the Java plugin, JDWP is not added and only the
 BeanShell debugger runs.
 
+**The Maven path gets this for free, with none of the above.** `BshMavenRunConfiguration`
+extends `MavenRunConfiguration` and only augments `getState()` before delegating to
+`super.getState()`, so the Debug executor wraps the forked Maven JVM in JDWP exactly as
+it would for any other Maven run — no `BshJavaDebugAttach`, no manual `-agentlib:jdwp`.
+Verified by hand: debugging `plugin/samples/maven/build-helper`'s `bsh-property` goal
+opens a `BeanShell (Maven)` session alongside a Java one, and a breakpoint in Java code
+the script calls into is actually hit. See [`FUTURE_WORK.md`](../../docs/FUTURE_WORK.md).
+
 ## Variables and frames
 
 Both are fetched on demand. A stop reports only the stack — one entry per frame,

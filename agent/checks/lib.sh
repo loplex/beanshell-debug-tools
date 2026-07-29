@@ -33,19 +33,31 @@ fail() {
     fi
 }
 
-# assert_contains <haystack-file> <needle> <description>
+# Prints the tail of a file indented to line up under a fail() message.
+_tail_context() {
+    printf '       --- last %d lines of %s ---\n' "$2" "$1"
+    tail -n "$2" "$1" | sed 's/^/       /'
+}
+
+# assert_contains <haystack-file> <needle> <description> [<raw-output-file>]
+#
+# The optional 4th argument is the *unfiltered* command output the haystack was extracted from
+# (e.g. by grep). On failure it's dumped to the log: the haystack alone is often just the empty
+# result of that extraction, which says nothing about why -- the raw output usually does.
 assert_contains() {
     if grep -qF -- "$2" "$1"; then
         pass "$3"
     else
         fail "$3" "not found: $2"
+        [[ -n "${4:-}" && -f "$4" ]] && _tail_context "$4" 20
     fi
 }
 
-# assert_not_contains <haystack-file> <needle> <description>
+# assert_not_contains <haystack-file> <needle> <description> [<raw-output-file>]
 assert_not_contains() {
     if grep -qF -- "$2" "$1"; then
         fail "$3" "unexpectedly found: $2"
+        [[ -n "${4:-}" && -f "$4" ]] && _tail_context "$4" 20
     else
         pass "$3"
     fi

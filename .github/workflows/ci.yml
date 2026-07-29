@@ -37,5 +37,21 @@ jobs:
 
       # ubuntu-latest already ships Maven and Python 3, which the checks need
       # (02-maven-plugin-realm.sh, dap-client.py); nothing extra to install.
+
+      # 02-maven-plugin-realm.sh runs `mvn -o` (offline) against these two poms, so their
+      # plugins must already be in ~/.m2/repository before that check runs.
+      - name: Cache local Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('plugin/samples/maven/build-helper/pom.xml', 'plugin/samples/maven/enforcer/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-m2-
+
+      - name: Warm the local Maven repo for the offline agent checks
+        run: |
+          mvn -q -f plugin/samples/maven/build-helper/pom.xml validate
+          mvn -q -f plugin/samples/maven/enforcer/pom.xml validate
+
       - name: Run agent/checks
         run: ./agent/checks/run-all.sh

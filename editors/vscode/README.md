@@ -72,6 +72,29 @@ Stopping the session (rather than disconnecting) kills the JVM this extension la
 *attached* session leaves the target process alone either way, since it was never this
 extension's to manage.
 
+## Testing
+
+`src/test/` drives a real, headless VS Code (`@vscode/test-electron` + Mocha) against the fixture
+workspace in `src/test/fixtures/workspace/` -- the same script, breakpoint line and evaluate
+expression [`agent/checks/07-dap-transport.sh`](../../agent/checks/07-dap-transport.sh) already
+proves work over `DapChannel`, driven here through a real `launch` session instead of the
+standalone `dap-client.py`, so it covers the one thing `07` cannot: this extension's own
+`BshDebugAdapterDescriptorFactory.launch()` (port allocation, the `-javaagent` spawn, the
+`DAP: listening` stdout watch). Assertions run against the DAP traffic via a
+`DebugAdapterTracker` and `session.customRequest()`, since no UI is present to trigger
+`stackTrace`/`scopes`/`variables`/`evaluate` by clicking. Completion is detected via
+`onDidTerminateDebugSession` rather than a `terminated` DAP event, since `DapChannel` never
+sends one -- the JVM exiting just drops the socket.
+
+```bash
+npm test               # needs a display
+xvfb-run -a npm test   # headless / CI
+```
+
+`npm test` builds the agent jar itself, via the same `:agent:samples:printPaths` Gradle task
+[`agent/checks/lib.sh`](../../agent/checks/lib.sh) uses. The first run also downloads and caches
+a VS Code build under `.vscode-test/`.
+
 ## Alternatives
 
 [`../neovim/`](../neovim/) and [`../eclipse/`](../eclipse/) cover the same transport for those

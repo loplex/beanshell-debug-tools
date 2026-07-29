@@ -1,0 +1,11 @@
+// Mirrors the fixture agent/checks/07-dap-transport.sh builds inline, so the same
+// breakpoint line and evaluate expression are proven to work over DapChannel before
+// this suite drives them through a real VS Code debug session.
+total = 0;
+compute(n) {
+    doubled = n * 2;
+    return doubled + total;
+}
+total = 5;
+print("result=" + compute(7));
+print("script done");

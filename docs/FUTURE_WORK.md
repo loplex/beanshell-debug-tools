@@ -108,12 +108,42 @@ JDWP-based debug channel (reuse `BshJavaDebugAttach`) so the developer can step
 *into* the Java code a Maven-run script calls, in addition to line-stepping the
 script itself. Independent of the script-level transport; purely additive.
 
-### End-to-end GUI test for the VS Code extension
+### End-to-end GUI test for the VS Code extension — done
 
-`editors/vscode/` has no automated test of its own yet — only the agent-side
-`agent/checks/07-dap-transport.sh`, which exercises `DapChannel` but never opens
-VS Code itself. Cover it with `@vscode/test-electron` (Mocha): launch a real,
-headless VS Code (Xvfb) against a workspace containing a `.bsh` file, call
-`vscode.debug.startDebugging(...)`, and assert on the DAP traffic via a
-`DebugAdapterTracker` — the same shape as the existing agent check, one layer up
-the stack.
+`editors/vscode/src/test/` now covers what `agent/checks/07-dap-transport.sh` cannot: a real,
+headless VS Code (`@vscode/test-electron` + Mocha, under Xvfb) starting an actual `launch`
+session against the fixture in `src/test/fixtures/workspace/`, asserting on the DAP traffic via
+a `DebugAdapterTracker`. The fixture, breakpoint line and evaluate expression are the same ones
+`07` already proved work over `DapChannel` — deliberately, so the two checks are provably
+exercising the same behaviour one layer apart rather than two fixtures that could quietly drift.
+
+**The one real gap `07` cannot reach**, and the reason this is `launch` rather than `attach`:
+`dap-client.py` connects to a JVM the check already started, so it never touches this
+extension's own `BshDebugAdapterDescriptorFactory.launch()` — the port allocation, the
+`-javaagent` spawn, watching stdout for `DAP: listening`. `attach` would have covered `DapChannel`
+a second time and nothing new.
+
+**The handshake needed nothing hand-rolled.** `dap-client.py` drives `initialize` and
+`configurationDone` itself because it *is* the client; `vscode.debug.startDebugging()` does that
+internally, so the test only needed `session.customRequest()` for what a UI would otherwise
+trigger by clicking — `stackTrace`, `scopes`, `variables`, `evaluate`, `continue`.
+
+**What running it against a real client actually found**, and would not have shown up against
+`dap-client.py`: `DapChannel` never sends a `terminated` or `exited` DAP event. When the script
+runs to completion the JVM just exits and the socket drops, and `dap-client.py` never noticed
+because it only speaks the protocol, not VS Code's own session bookkeeping. A real client has
+to fall back to `onDidTerminateDebugSession` — the same signal `descriptorFactory.ts` already
+uses to know when to stop waiting on the child process — rather than a message on the wire. Not
+a bug to fix here, but worth knowing before adding another DAP client: nothing announces normal
+completion, only the connection going away.
+
+**"Headless" needed an extra push on a real Wayland desktop.** `xvfb-run` sets `DISPLAY` for its
+virtual framebuffer, but leaves `WAYLAND_DISPLAY` alone, and Electron's Ozone platform selection
+prefers a real Wayland compositor over that X11 display whenever one is reachable -- an
+`ELECTRON_OZONE_PLATFORM_HINT=x11` env var was not enough to stop it. `runTest.ts` removes
+`WAYLAND_DISPLAY` from the child's environment outright and passes `--ozone-platform=x11` as a
+hard switch, so there is nothing left for Electron to prefer.
+
+Run with `npm test` (`xvfb-run -a npm test` headless); resolves `AGENT_JAR`/`BSH_CLASSPATH`
+through the same `:agent:samples:printPaths` Gradle task `agent/checks/lib.sh` uses. Documented
+in [`editors/vscode/README.md`](../editors/vscode/README.md#testing).

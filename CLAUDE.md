@@ -79,3 +79,6 @@ is the in-plugin hook class used by the *source-rewriting* fallback
   `fix:` tag.
 - **No `Co-Authored-By` trailer.** The maintainer reviews and edits every commit before
   pushing.
+- **Commits not yet pushed to a branch's upstream are fair game to restructure.** Split,
+  merge, or reorder them freely — whatever makes the resulting history clearest thematically
+  and easiest to read. Once something is pushed, don't rewrite it without being asked.

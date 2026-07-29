@@ -107,3 +107,13 @@ The original inline-debug plan left one optional item unimplemented: a second,
 JDWP-based debug channel (reuse `BshJavaDebugAttach`) so the developer can step
 *into* the Java code a Maven-run script calls, in addition to line-stepping the
 script itself. Independent of the script-level transport; purely additive.
+
+### End-to-end GUI test for the VS Code extension
+
+`editors/vscode/` has no automated test of its own yet — only the agent-side
+`agent/checks/07-dap-transport.sh`, which exercises `DapChannel` but never opens
+VS Code itself. Cover it with `@vscode/test-electron` (Mocha): launch a real,
+headless VS Code (Xvfb) against a workspace containing a `.bsh` file, call
+`vscode.debug.startDebugging(...)`, and assert on the DAP traffic via a
+`DebugAdapterTracker` — the same shape as the existing agent check, one layer up
+the stack.

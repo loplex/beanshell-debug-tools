@@ -161,3 +161,28 @@ hard switch, so there is nothing left for Electron to prefer.
 Run with `npm test` (`xvfb-run -a npm test` headless); resolves `AGENT_JAR`/`BSH_CLASSPATH`
 through the same `:agent:samples:printPaths` Gradle task `agent/checks/lib.sh` uses. Documented
 in [`editors/vscode/README.md`](../editors/vscode/README.md#testing).
+
+### End-to-end GUI tests for Neovim and Eclipse
+
+VS Code has one now (above); Neovim and Eclipse still only get the manual
+`agent/checks/07-dap-transport.sh` / `dap-client.py` coverage, which speaks the protocol but
+is not a real client. That distinction is exactly what made the VS Code test worth writing:
+its one real finding — `DapChannel` never sends a `terminated`/`exited` DAP event — came from
+using `vscode.debug.startDebugging()` instead of a hand-rolled script, and there is no reason
+the same class of gap couldn't exist in either editor's own session bookkeeping instead.
+
+Neovim is the more tractable of the two: `nvim --headless` plus a Lua test runner (`plenary.nvim`
+or a plain `nvim -l` script) can drive `nvim-dap` the same way the VS Code test drives
+`vscode.debug.startDebugging()`, with no display server needed. Eclipse's generic DAP client has
+no headless, scriptable entry point equivalent to that call — an end-to-end test there would mean
+SWTBot or similar driving real windows, for less differentiated coverage, since
+[`editors/eclipse/`](../editors/eclipse/README.md) is already attach-only and so exercises less
+of the extension-specific code the VS Code test caught its bug in.
+
+### GitHub Actions for builds
+
+No CI yet — `./gradlew build` and `agent/checks/run-all.sh` only run when someone remembers to
+run them locally. Both need nothing exotic: JDK 17+ (21 to match what Kotlin compiles to), and
+for the checks, `mvn` and `python3` — all present on GitHub's `ubuntu-latest` image. The VS Code
+extension's own `npm test` (Xvfb + Electron) is a separate job at least, since it needs a virtual
+framebuffer and the Wayland-avoidance fix already in `runTest.ts`.

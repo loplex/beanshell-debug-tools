@@ -1,5 +1,6 @@
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
@@ -33,6 +34,15 @@ dependencies {
         // dependency (bsh-maven.xml) so the plugin still loads where Maven is absent.
         bundledPlugin("org.jetbrains.idea.maven")
     }
+}
+
+// Since 2025.3, intellijIdea() bundles what used to be Ultimate-only plugins (this
+// plugin never asked for any of them). The Vue.js plugin's VueLspServerSupportProvider
+// intermittently throws during lazy init in a headless test sandbox, and doHighlighting()
+// (used by feature tests) triggers every registered extension point -- so the logged
+// error fails whichever test happens to be running at the time, not a real regression.
+tasks.named<PrepareSandboxTask>("prepareTestSandbox") {
+    disabledPlugins.add("org.jetbrains.plugins.vue")
 }
 
 // The project-level IntelliJ Platform Gradle Plugin extension: distinct from the

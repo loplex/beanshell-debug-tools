@@ -55,14 +55,18 @@ jobs:
         if: steps.changelog.outputs.released == 'true'
         run: ./gradlew :plugin:buildPlugin -Pversion=${{ needs.version.outputs.version }} --stacktrace
 
+      - name: Stage the artifact
+        if: steps.changelog.outputs.released == 'true'
+        run: |
+          mkdir -p dist
+          cp plugin/build/distributions/*.zip notes.md dist/
+
       - name: Upload the build
         if: steps.changelog.outputs.released == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: plugin
-          path: |
-            plugin/build/distributions/*.zip
-            notes.md
+          path: dist/*
           retention-days: 1
 
   agent:
@@ -94,14 +98,18 @@ jobs:
         if: steps.changelog.outputs.released == 'true'
         run: ./gradlew :agent:instrument:shadowJar -Pversion=${{ needs.version.outputs.version }} --stacktrace
 
+      - name: Stage the artifact
+        if: steps.changelog.outputs.released == 'true'
+        run: |
+          mkdir -p dist
+          cp agent/instrument/build/libs/*.jar notes.md dist/
+
       - name: Upload the build
         if: steps.changelog.outputs.released == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: agent
-          path: |
-            agent/instrument/build/libs/*.jar
-            notes.md
+          path: dist/*
           retention-days: 1
 
   vscode:
@@ -142,14 +150,18 @@ jobs:
           npx @vscode/vsce package --no-git-tag-version --no-update-package-json \
             ${{ needs.version.outputs.version }} -o bsh-debug-${{ needs.version.outputs.version }}.vsix
 
+      - name: Stage the artifact
+        if: steps.changelog.outputs.released == 'true'
+        run: |
+          mkdir -p ../../dist
+          cp *.vsix ../../notes.md ../../dist/
+
       - name: Upload the build
         if: steps.changelog.outputs.released == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: vscode
-          path: |
-            editors/vscode/*.vsix
-            notes.md
+          path: dist/*
           retention-days: 1
 
   github-release:
@@ -157,6 +169,8 @@ jobs:
     needs: [version, plugin, agent, vscode]
     if: needs.plugin.outputs.released == 'true' || needs.agent.outputs.released == 'true' || needs.vscode.outputs.released == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download the plugin build
         if: needs.plugin.outputs.released == 'true'

@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-01
+
+### Fixed
+
+- The plugin ID `cz.loplex.intellij.bsh` was rejected by JetBrains Marketplace
+  for including the word "intellij"; it's now `cz.loplex.bsh`.
+
 ## [0.1.0] - 2026-07-31
 
 ### Added

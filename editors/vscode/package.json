@@ -5,6 +5,7 @@
   "icon": "images/icon.png",
   "version": "0.1.0-dev",
   "publisher": "loplex",
+  "author": "Martin Lopatář <lopin.git@loplex.cz>",
   "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.90.0"

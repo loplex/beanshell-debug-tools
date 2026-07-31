@@ -2,6 +2,7 @@
   "name": "bsh-debug",
   "displayName": "BeanShell Debug",
   "description": "Debug BeanShell scripts by attaching to (or launching) the bsh-plugin debug agent's DAP transport.",
+  "icon": "images/icon.png",
   "version": "0.1.0-dev",
   "publisher": "loplex",
   "license": "Apache-2.0",

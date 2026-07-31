@@ -16,7 +16,7 @@ class BshMavenRunConfigurationType : ConfigurationTypeBase(
     ID,
     "BeanShell-enhanced Maven",
     "Maven run configuration that also debugs inline BeanShell scripts",
-    BshIcons.FILE,
+    BshIcons.MAVEN,
 ) {
     init {
         addFactory(Factory(this))

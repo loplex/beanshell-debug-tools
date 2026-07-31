@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-31
+
 ### Added
 
 - BeanShell (`.bsh`) language support built on a hand-written lexer and a

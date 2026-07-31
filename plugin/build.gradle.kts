@@ -1,3 +1,4 @@
+import org.jetbrains.changelog.Changelog
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
@@ -31,6 +32,50 @@ dependencies {
         // configuration that debugs inline <script> blocks. Wired as an optional
         // dependency (bsh-maven.xml) so the plugin still loads where Maven is absent.
         bundledPlugin("org.jetbrains.idea.maven")
+    }
+}
+
+// The project-level IntelliJ Platform Gradle Plugin extension: distinct from the
+// dependencies-scoped `intellijPlatform { }` block above (a different receiver type,
+// `IntelliJPlatformExtension` vs. `IntelliJPlatformDependenciesExtension`) despite the
+// identical name.
+intellijPlatform {
+    pluginConfiguration {
+        // "253" = the 2025.3 build number branch. Left open-ended on the upper
+        // end, per JetBrains' own guidance, since nothing here is known to break
+        // on newer IDEs; see plugin/CLAUDE.md for the targeted platform version.
+        ideaVersion {
+            sinceBuild = "253"
+        }
+
+        // Computed eagerly (not via a lazy Provider chain) on purpose: a lambda
+        // referencing the `changelog` extension captures the whole Project, which
+        // the configuration cache can't serialize. `-Pversion` is already resolved
+        // by the time this line runs, so there is nothing to gain from laziness here.
+        // Reads CHANGELOG.md's "[Unreleased]" section by default, or the section
+        // matching the release version once release.yml patches it in. See
+        // docs/RELEASING.md.
+        changeNotes = with(changelog) {
+            renderItem(
+                (getOrNull(project.version.toString()) ?: getUnreleased())
+                    .withHeader(false)
+                    .withEmptySections(false),
+                Changelog.OutputType.HTML,
+            )
+        }
+    }
+
+    // Both blocks read from environment variables rather than Gradle properties
+    // because their values are secrets injected by release.yml, never committed.
+    // See docs/RELEASING.md for how to generate and register them.
+    signing {
+        certificateChain = providers.environmentVariable("CERTIFICATE_CHAIN")
+        privateKey = providers.environmentVariable("PRIVATE_KEY")
+        password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
+    }
+
+    publishing {
+        token = providers.environmentVariable("JETBRAINS_MARKETPLACE_TOKEN")
     }
 }
 

@@ -63,6 +63,8 @@ coordinates and publishes just as well.
   [`editors/eclipse/`](editors/eclipse/README.md) cover the same transport for those editors.
 - [`docs/BEANSHELL-DEFECTS.md`](docs/BEANSHELL-DEFECTS.md) — upstream bugs in
   BeanShell 2.0b6 that a debugger runs into.
+- [`docs/RELEASING.md`](docs/RELEASING.md) — cutting a release: the changelog step,
+  tagging, and the one-time Marketplace/signing/secrets setup.
 
 **Two different things are called "the agent".** `agent/` is the ASM-instrumenting
 JVM agent (`cz.loplex.bsh.*`), the default mechanism. `plugin/…/debug/agent/BshDebugAgent.java`

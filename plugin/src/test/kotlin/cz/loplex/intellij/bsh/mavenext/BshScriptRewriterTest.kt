@@ -101,7 +101,7 @@ class BshScriptRewriterTest {
         // Maven interpolates ${...} in plugin config before afterProjectsRead, so the value we see is
         // already expanded; the manifest still holds the raw script the IDE captured. It must match.
         val expanded = "version = \"1.0.0\";\ngroupId = \"com.example.bsh\";\nok"
-        val raw = "version = \"\${project.version}\";\ngroupId = \"\${project.groupId}\";\nok"
+        val raw = $$"version = \"${project.version}\";\ngroupId = \"${project.groupId}\";\nok"
         val condition = element("condition", expanded)
         val plugin = beanshellPlugin(config(condition)).apply { artifactId = "maven-enforcer-plugin" }
 
@@ -116,7 +116,7 @@ class BshScriptRewriterTest {
         // The ${...} tolerance must not turn into a wildcard that swallows an unrelated script.
         val condition = element("condition", "somethingElse();")
         val plugin = beanshellPlugin(config(condition)).apply { artifactId = "maven-enforcer-plugin" }
-        val raw = "version = \"\${project.version}\";\nok"
+        val raw = $$"version = \"${project.version}\";\nok"
 
         val replaced = BshScriptRewriter().instrumentPlugin(plugin, listOf(sub("condition", raw, "INSTR")), callbackJar)
 

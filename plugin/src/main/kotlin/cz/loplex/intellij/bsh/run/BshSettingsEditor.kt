@@ -22,7 +22,7 @@ class BshSettingsEditor : SettingsEditor<BshRunConfiguration>() {
     private val jrePath = TextFieldWithBrowseButton()
     private val workingDirectory = TextFieldWithBrowseButton()
     private val programArguments = RawCommandLineEditor()
-    private val instrumentation = ComboBox(BshInstrumentationMode.values()).apply {
+    private val instrumentation = ComboBox(BshInstrumentationMode.entries.toTypedArray()).apply {
         renderer = SimpleListCellRenderer.create("") { it.label }
     }
 

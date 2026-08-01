@@ -115,7 +115,7 @@ class BshMavenRunConfiguration(
             try {
                 // Materialise a private runner settings on the clone before injecting our properties.
                 val settings = (runnerSettings ?: MavenRunner.getInstance(project).settings).clone()
-                setRunnerSettings(settings)
+                runnerSettings = settings
                 val props = LinkedHashMap(settings.mavenProperties)
                 props[BshDebugAgent.PORT_PROPERTY] = server.localPort.toString()
 
@@ -125,7 +125,7 @@ class BshMavenRunConfiguration(
                     val notice = if (mode.toleratesRewriteFallback) BshDebugRunner.REWRITE_FALLBACK_NOTICE else null
                     setUpRewrite(props, prepared, server, notice) ?: return
                 }
-                settings.setMavenProperties(props)
+                settings.mavenProperties = props
 
                 BshMavenDebugSupport.register(environment.executionId, pending)
                 LOG.info("Prepared BeanShell Maven debug for ${prepared.size} script(s) on port ${server.localPort}")
@@ -155,6 +155,7 @@ class BshMavenRunConfiguration(
         server: ServerSocket,
     ): BshMavenDebugSupport.Pending {
         val prefixes = BshMavenDebugSupport.writeSourcePrefixes(prepared)
+        @Suppress("UsePropertyAccessSyntax")
         settings.setVmOptions(
             listOfNotNull(
                 settings.vmOptions.takeIf { it.isNotBlank() },

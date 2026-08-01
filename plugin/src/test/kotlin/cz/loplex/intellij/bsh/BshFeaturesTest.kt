@@ -125,19 +125,19 @@ class BshFeaturesTest : BasePlatformTestCase() {
     fun testSelfExecutingPolyglotHack() {
         val content = "#!/bin/sh\n" +
             "// The following hack allows java to reside anywhere in the PATH.\n" +
-            "//bin/true; exec java bsh.Interpreter \"\$0\" \"\$@\"\n" +
+            $$"//bin/true; exec java bsh.Interpreter \"$0\" \"$@\"\n" +
             "print(1);"
         assertEquals(BshFileType, detect(content))
     }
 
     fun testSelfExecutingPolyglotWithBashShebang() {
-        val content = "#!/bin/bash\n//bin/true; exec java bsh.Interpreter \"\$0\" \"\$@\"\nprint(1);"
+        val content = $$"#!/bin/bash\n//bin/true; exec java bsh.Interpreter \"$0\" \"$@\"\nprint(1);"
         assertEquals(BshFileType, detect(content))
     }
 
     fun testSelfExecutingPolyglotWithArbitraryShebang() {
         // The shebang target is irrelevant; only the bsh.Interpreter invocation matters.
-        val content = "#!/opt/whatever/launcher --flag\nexec java bsh.Interpreter \"\$0\"\nprint(1);"
+        val content = $$"#!/opt/whatever/launcher --flag\nexec java bsh.Interpreter \"$0\"\nprint(1);"
         assertEquals(BshFileType, detect(content))
     }
 

@@ -87,7 +87,7 @@ enum class BshInstrumentationMode(
          * value written by a different version of the plugin — or edited by hand. Falling back to
          * [DEFAULT] costs the user their choice; refusing to launch would cost them the session.
          */
-        fun of(name: String?): BshInstrumentationMode = values().firstOrNull { it.name == name } ?: DEFAULT
+        fun of(name: String?): BshInstrumentationMode = entries.firstOrNull { it.name == name } ?: DEFAULT
     }
 }
 

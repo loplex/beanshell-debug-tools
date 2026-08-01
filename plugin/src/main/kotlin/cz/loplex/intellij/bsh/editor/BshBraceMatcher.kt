@@ -12,12 +12,10 @@ class BshBraceMatcher : PairedBraceMatcher {
     override fun isPairedBracesAllowedBeforeType(lbraceType: IElementType, contextType: IElementType?): Boolean = true
 
     override fun getCodeConstructStart(file: PsiFile?, openingBraceOffset: Int): Int = openingBraceOffset
-
-    companion object {
-        private val PAIRS = arrayOf(
-            BracePair(BshTokenTypes.LBRACE, BshTokenTypes.RBRACE, true),
-            BracePair(BshTokenTypes.LPAREN, BshTokenTypes.RPAREN, false),
-            BracePair(BshTokenTypes.LBRACKET, BshTokenTypes.RBRACKET, false),
-        )
-    }
 }
+
+private val PAIRS = arrayOf(
+    BracePair(BshTokenTypes.LBRACE, BshTokenTypes.RBRACE, true),
+    BracePair(BshTokenTypes.LPAREN, BshTokenTypes.RPAREN, false),
+    BracePair(BshTokenTypes.LBRACKET, BshTokenTypes.RBRACKET, false),
+)

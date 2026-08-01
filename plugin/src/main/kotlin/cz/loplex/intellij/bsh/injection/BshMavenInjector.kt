@@ -63,10 +63,10 @@ class BshMavenInjector : MultiHostInjector {
     private fun hasLanguageComment(tag: XmlTag): Boolean {
         var sibling = tag.prevSibling
         while (sibling != null) {
-            when {
-                sibling is PsiWhiteSpace -> {}
-                sibling is XmlText && sibling.getText().isBlank() -> {}
-                sibling is XmlComment -> return LANGUAGE_COMMENT.containsMatchIn(sibling.text)
+            when (sibling) {
+                is PsiWhiteSpace -> {}
+                is XmlText -> if (!sibling.text.isBlank()) return false
+                is XmlComment -> return LANGUAGE_COMMENT.containsMatchIn(sibling.text)
                 else -> return false
             }
             sibling = sibling.prevSibling
@@ -94,9 +94,7 @@ class BshMavenInjector : MultiHostInjector {
 
     private fun childValue(tag: XmlTag, name: String): String? =
         tag.findFirstSubTag(name)?.value?.trimmedText
-
-    companion object {
-        private val LANGUAGE_COMMENT =
-            Regex("(?i)(?:language|lang)\\s*=\\s*(?:beanshell|bsh)")
-    }
 }
+
+private val LANGUAGE_COMMENT =
+    Regex("(?i)(?:language|lang)\\s*=\\s*(?:beanshell|bsh)")

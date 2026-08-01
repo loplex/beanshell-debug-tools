@@ -33,10 +33,10 @@ object BshJavaResolver {
         if (name.contains('.')) return null // an explicit FQN that was not found
 
         facade.findClass("java.lang.$name", scope)?.let { return it }
-        for (imp in imports(context)) {
+        for ((path, onDemand) in imports(context)) {
             val candidate = when {
-                imp.onDemand -> "${imp.path}.$name"
-                imp.path.substringAfterLast('.') == name -> imp.path
+                onDemand -> "$path.$name"
+                path.substringAfterLast('.') == name -> path
                 else -> continue
             }
             facade.findClass(candidate, scope)?.let { return it }

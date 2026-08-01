@@ -52,12 +52,10 @@ class BshIntroduceVariableIntention : IntentionAction {
         val text = file.text
         return CANDIDATES.firstOrNull { !Regex("\\b${Regex.escape(it)}\\b").containsMatchIn(text) } ?: "x1"
     }
-
-    companion object {
-        private val EXPRESSION_TYPES = setOf(
-            E.PRIMARY_EXPRESSION, E.BINARY_EXPRESSION, E.UNARY_EXPRESSION, E.TERNARY_EXPRESSION,
-            E.CAST_EXPRESSION, E.METHOD_INVOCATION, E.ALLOCATION_EXPRESSION, E.LITERAL,
-        )
-        private val CANDIDATES = listOf("x", "y", "z", "value", "result")
-    }
 }
+
+private val EXPRESSION_TYPES = setOf(
+    E.PRIMARY_EXPRESSION, E.BINARY_EXPRESSION, E.UNARY_EXPRESSION, E.TERNARY_EXPRESSION,
+    E.CAST_EXPRESSION, E.METHOD_INVOCATION, E.ALLOCATION_EXPRESSION, E.LITERAL,
+)
+private val CANDIDATES = listOf("x", "y", "z", "value", "result")

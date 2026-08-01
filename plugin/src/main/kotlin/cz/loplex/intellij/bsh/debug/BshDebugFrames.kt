@@ -280,9 +280,9 @@ private class BshValueModifier(
      * BeanShell literal too. A `toString()` is not generally an expression, so offering `Point@1c2f`
      * back would hand the user something that cannot even parse; those open empty instead.
      */
-    override fun getInitialValueEditorText(): String? = when {
-        variable.type == "String" -> quotedLiteral(variable.value)
-        variable.type in LITERAL_TYPES -> variable.value
+    override fun getInitialValueEditorText(): String? = when (variable.type) {
+        "String" -> quotedLiteral(variable.value)
+        in LITERAL_TYPES -> variable.value
         else -> null
     }
 }
@@ -315,6 +315,7 @@ private fun quotedLiteral(value: String): String = buildString(value.length + 2)
 
 // Wrapped explicitly rather than passed as a lambda: executeOnPooledThread is overloaded for
 // Runnable and Callable, and a Kotlin `() -> Unit` fits both.
+@Suppress("RedundantSamConstructor")
 private fun onPooledThread(work: () -> Unit) {
     ApplicationManager.getApplication().executeOnPooledThread(Runnable { work() })
 }

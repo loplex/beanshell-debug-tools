@@ -1,18 +1,18 @@
 /**
  * Embeds BeanShell the way a third-party library does, so the agent under test
  * sees a realistic entry pattern rather than the CLI one.
- *
+ * <p>
  * Why this matters: running a script with `java bsh.Interpreter foo.bsh` goes
  * through Interpreter.run() (Interpreter.java:471). Everything a library does
  * instead goes through Interpreter.eval(Reader, NameSpace, String)
  * (Interpreter.java:659). Those are two SEPARATE loops -- an agent that hooks
  * only one will look like it works in the CLI and do nothing in production, or
  * vice versa. Scenario 1 below covers eval(); run the CLI runner for the other.
- *
+ * <p>
  * Run from the repository root:
  *   ./gradlew :agent:samples:runHost             # all scenarios
  *   ./gradlew :agent:samples:runHostWithAgent    # the same, instrumented
- *
+ * <p>
  * Both tasks set the working directory to scripts/, because the fixtures source()
  * each other by bare name. To pick a single scenario, append --args='3'.
  */
@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+@SuppressWarnings("JavaPrintToLogpoint")
 public class DebugHost {
 
     /** Directory holding the .bsh fixtures. Override with -Dsamples=/path. */
@@ -49,6 +50,7 @@ public class DebugHost {
     }
 
     private static Interpreter fresh() {
+        @SuppressWarnings("UnnecessaryLocalVariable")
         Interpreter i = new Interpreter();
         // Uncomment to see the built-in tracing for comparison with your agent.
         // Interpreter.TRACE = true;
@@ -97,7 +99,7 @@ public class DebugHost {
         Interpreter i = fresh();
         i.eval("compute(a, b) { inner = a * b; return inner + 1; }");
         NameSpace global = i.getNameSpace();
-        Object result = global.invokeMethod("compute", new Object[]{6, 7}, i);
+        Object result = global.invokeMethod("compute", new Object[] { 6 , 7 }, i);
         System.out.println("[host] compute(6,7) = " + result);
     }
 
@@ -115,13 +117,14 @@ public class DebugHost {
           + "  return this;"
           + "}");
         This scripted = (This) i.eval("makeCmp();");
-        Comparator cmp = (Comparator) scripted.getInterface(Comparator.class);
+        @SuppressWarnings("unchecked") // BeanShell's This.getInterface predates generics
+        Comparator<String> cmp = (Comparator<String>) scripted.getInterface(Comparator.class);
 
-        List words = new ArrayList();
+        List<String> words = new ArrayList<>();
         words.add("ccc");
         words.add("a");
         words.add("bb");
-        java.util.Collections.sort(words, cmp);   // Java drives the script
+        words.sort(cmp);   // Java drives the script
         System.out.println("[host] sorted = " + words);
     }
 
@@ -153,17 +156,13 @@ public class DebugHost {
         b.join();
     }
 
-    private static Runnable makeJob(
-            final Interpreter i, final NameSpace ns, final String tag) {
-        return new Runnable() {
-            public void run() {
-                try {
-                    Object r = ns.invokeMethod(
-                            "work", new Object[]{tag, 3}, i);
-                    System.out.println("[host] " + r);
-                } catch (EvalError e) {
-                    throw new RuntimeException(e);
-                }
+    private static Runnable makeJob(Interpreter i, NameSpace ns, String tag) {
+        return () -> {
+            try {
+                Object r = ns.invokeMethod("work", new Object[] { tag, 3 }, i);
+                System.out.println("[host] " + r);
+            } catch (EvalError e) {
+                throw new RuntimeException(e);
             }
         };
     }
@@ -183,8 +182,7 @@ public class DebugHost {
         System.out.println("[host] java class = " + p.getClass().getName());
         System.out.println("[host] toString    = " + p);
         // Reflective call straight into the generated shim.
-        Object d2 = p.getClass().getMethod("distanceSquared", new Class[0])
-                .invoke(p, new Object[0]);
+        Object d2 = p.getClass().getMethod("distanceSquared").invoke(p);
         System.out.println("[host] distanceSquared = " + d2 + " (expect 169)");
     }
 

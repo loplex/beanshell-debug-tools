@@ -74,8 +74,7 @@ public class BshMavenDebugParticipant extends AbstractMavenLifecycleParticipant 
     /** Parses the manifest into substitutions grouped by the owning plugin's artifactId. */
     private Map<String, List<BshScriptRewriter.Substitution>> readManifest(String manifest)
             throws MavenExecutionException {
-        Map<String, List<BshScriptRewriter.Substitution>> byArtifact =
-                new LinkedHashMap<String, List<BshScriptRewriter.Substitution>>();
+        Map<String, List<BshScriptRewriter.Substitution>> byArtifact = new LinkedHashMap<>();
         try {
             for (String line : Files.readAllLines(Paths.get(manifest), StandardCharsets.UTF_8)) {
                 if (line.isEmpty() || line.charAt(0) == '#') {
@@ -90,11 +89,8 @@ public class BshMavenDebugParticipant extends AbstractMavenLifecycleParticipant 
                 String original = new String(Files.readAllBytes(Paths.get(parts[2])), StandardCharsets.UTF_8);
                 String instrumented = new String(Files.readAllBytes(Paths.get(parts[3])), StandardCharsets.UTF_8);
 
-                List<BshScriptRewriter.Substitution> substitutions = byArtifact.get(artifactId);
-                if (substitutions == null) {
-                    substitutions = new ArrayList<BshScriptRewriter.Substitution>();
-                    byArtifact.put(artifactId, substitutions);
-                }
+                List<BshScriptRewriter.Substitution> substitutions =
+                        byArtifact.computeIfAbsent(artifactId, k -> new ArrayList<>());
                 substitutions.add(new BshScriptRewriter.Substitution(tag, original, instrumented));
             }
         } catch (IOException ex) {

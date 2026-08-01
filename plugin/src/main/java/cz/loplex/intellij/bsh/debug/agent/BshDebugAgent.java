@@ -68,7 +68,7 @@ public final class BshDebugAgent {
      * alive. Losing an entry costs nothing: a thread that never reports again never needs its id, and
      * one that does gets a fresh id, which the IDE treats as a new thread.
      */
-    private static final Map<Thread, Integer> threadIds = new WeakHashMap<Thread, Integer>();
+    private static final Map<Thread, Integer> threadIds = new WeakHashMap<>();
 
     private static final int port;
     private static boolean disabled;
@@ -161,10 +161,10 @@ public final class BshDebugAgent {
         synchronized (threadIds) {
             Integer existing = threadIds.get(thread);
             if (existing != null) {
-                return existing.intValue();
+                return existing;
             }
             int assigned = threadIds.size() + 1;
-            threadIds.put(thread, Integer.valueOf(assigned));
+            threadIds.put(thread, assigned);
             return assigned;
         }
     }
@@ -246,7 +246,7 @@ public final class BshDebugAgent {
                 int requestId = in.readInt();
                 int handle = in.readInt();
                 Map<String, String> variables =
-                        handle == NAMESPACE_HANDLE ? readVariables(namespace) : Collections.<String, String>emptyMap();
+                        handle == NAMESPACE_HANDLE ? readVariables(namespace) : Collections.emptyMap();
                 out.writeByte(EVT_VARIABLES);
                 out.writeInt(requestId);
                 out.writeInt(variables.size());

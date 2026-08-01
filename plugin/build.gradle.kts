@@ -1,6 +1,7 @@
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask
+import javax.xml.parsers.DocumentBuilderFactory
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
@@ -49,6 +50,55 @@ tasks.named<PrepareSandboxTask>("prepareTestSandbox") {
 // levels, stray Kotlin stdlib/coroutines deps, ...) -- not wired to `check` by default.
 tasks.named("check") {
     dependsOn("verifyPluginProjectConfiguration")
+}
+
+// Renders plugin.xml's <description> (the Marketplace listing text) as a standalone HTML
+// file, so it can be reviewed in a browser -- exactly as JetBrains Marketplace will show it --
+// without publishing anything. Not wired to `build`; run it on demand after editing the
+// description.
+tasks.register("renderMarketplaceDescription") {
+    group = "documentation"
+    description = "Renders plugin.xml's <description> as a standalone HTML file for previewing the Marketplace listing"
+
+    val pluginXml = layout.projectDirectory.file("src/main/resources/META-INF/plugin.xml")
+    val outputFile = layout.buildDirectory.file("marketplace-description.html")
+    inputs.file(pluginXml)
+    outputs.file(outputFile)
+
+    doLast {
+        val description = DocumentBuilderFactory.newInstance()
+            .newDocumentBuilder()
+            .parse(pluginXml.asFile)
+            .getElementsByTagName("description")
+            .item(0)
+            .textContent
+            .trim()
+
+        val html = """
+            |<!doctype html>
+            |<html>
+            |<head>
+            |<meta charset="utf-8">
+            |<title>BeanShell Language Support -- Marketplace description preview</title>
+            |<style>
+            |  body { max-width: 800px; margin: 2rem auto; padding: 0 1rem;
+            |         font-family: -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.5; }
+            |  img { max-width: 100%; border: 1px solid #ccc; }
+            |  code { background: #f0f0f0; padding: 0 .3em; border-radius: 3px; }
+            |</style>
+            |</head>
+            |<body>
+            |$description
+            |</body>
+            |</html>
+            |
+        """.trimMargin()
+
+        val file = outputFile.get().asFile
+        file.parentFile.mkdirs()
+        file.writeText(html)
+        logger.lifecycle("Marketplace description preview written to file://${file.absolutePath}")
+    }
 }
 
 // The project-level IntelliJ Platform Gradle Plugin extension: distinct from the

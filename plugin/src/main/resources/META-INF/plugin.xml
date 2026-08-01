@@ -13,12 +13,82 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Language support for <b>BeanShell</b> scripts (<code>.bsh</code>).<br>
+        Language support for <b>BeanShell</b> (<code>.bsh</code>) scripts: a full syntax
+        tree, code intelligence, running, and a source-level debugger &mdash; plus BeanShell
+        recognition inside Maven <code>pom.xml</code> configuration and XML in general.
+        <br><br>
+        The core runs in <b>any IntelliJ-based IDE</b> (IDEA, WebStorm, PyCharm, CLion, &hellip;);
+        Java-aware features &mdash; navigation into Java code, variable type inference and JVM-debugger
+        attach &mdash; light up in <b>IntelliJ IDEA</b> and other IDEs that bundle the Java plugin.
+        <br><br>
+        The language model follows the <a href="https://github.com/beanshell/beanshell/tree/2.0b6">BeanShell 2.0b6</a>
+        grammar, which is the version published to Maven Central and bundled with the plugin for
+        running scripts out of the box.
+        <br><br>
+        Source, issue tracker and full documentation:
+        <a href="https://github.com/loplex/beanshell-debug-tools">github.com/loplex/beanshell-debug-tools</a>.
+        <br><br>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/editor.png" width="700" alt="Syntax highlighting and Structure view"/>
+        <br><br>
+        <b>Editing</b>
         <ul>
             <li>Syntax highlighting with a configurable color scheme</li>
-            <li>Brace matching, code folding and line/block commenting</li>
-            <li>Structural analysis: unbalanced braces, unterminated strings and comments</li>
-            <li>Run BeanShell scripts from the editor via a dedicated run configuration</li>
+            <li>Code folding of blocks, comments and consecutive imports; brace matching</li>
+            <li>Line/block commenting and an indentation formatter (Reformat Code)</li>
+            <li>Structure view and breadcrumbs for the enclosing class/method</li>
+            <li>Read/write highlighting of the variable under the caret</li>
+            <li>Quick documentation, including a preceding Javadoc-style comment</li>
+            <li>Live templates (<code>sout</code>, <code>fori</code>, <code>iter</code>, &hellip;) and postfix templates (<code>.sout</code>, <code>.if</code>, <code>.while</code>)</li>
+            <li>Surround With (<code>if</code>, <code>while</code>, <code>try/catch</code>) and TODO highlighting</li>
+        </ul>
+        <b>Code intelligence</b>
+        <ul>
+            <li>A full AST parser (recursive descent with backtracking) that mirrors the BeanShell grammar and reports syntax errors as you type</li>
+            <li>Go to Declaration, Find Usages and Rename for methods, classes, typed and untyped variables, and parameters &mdash; methods and classes also resolve across the project's <code>.bsh</code> files</li>
+            <li>Code completion, parameter info and inlay parameter-name hints at call sites</li>
+            <li>Inspections with quick fixes: unused variable/parameter, unreachable code, and an opt-in unresolved method call check</li>
+            <li>Introduce Variable intention and Go to Symbol</li>
+        </ul>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/completion.png" width="700" alt="Code completion for keywords and in-scope names"/>
+        <br><br>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/inspection.png" width="700" alt="Inspection quick-fix for an unused variable"/>
+        <br><br>
+        <b>Java interoperability</b> <i>(requires the Java plugin &mdash; optional)</i>
+        <ul>
+            <li>Ctrl+Click into Java: class names (FQN, <code>java.lang.*</code>, imported), and members reached through static type propagation across a chain, e.g. <code>report.append("x").append("y")</code> or <code>list.get(0)</code></li>
+            <li>BeanShell class members: <code>greeter.greet()</code> navigates to the <code>greet</code> method of a <code>Greeter</code> class declared in the script</li>
+        </ul>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/navigation.png" width="700" alt="Quick documentation into Java on a chained member"/>
+        <br><br>
+        <b>Running</b>
+        <ul>
+            <li>A BeanShell run configuration; right-click a <code>.bsh</code> file to run it</li>
+            <li>The interpreter is bundled (<code>org.apache-extras.beanshell:bsh:2.0b6</code>), so scripts run with no setup; the classpath is overridable per configuration</li>
+            <li>Uses the project JDK when available (falls back to the IDE runtime)</li>
+        </ul>
+        <b>Debugging</b>
+        <ul>
+            <li>A source-level debugger for <code>.bsh</code> files: line breakpoints, the call stack, Step Over/Into/Out, and Run to Cursor</li>
+            <li>A variables view that expands nested objects, collections, maps and arrays, plus Watches, the Evaluate dialog, and Set Value on a variable &mdash; all evaluated by the real interpreter in the selected frame</li>
+            <li>Two instrumentation mechanisms, chosen per run configuration: a JVM agent that leaves the script on disk untouched (default), or rewriting the script, which needs no agent jar and no JVM flag but shows one frame and cannot evaluate</li>
+            <li>With the Java plugin present, breakpoints in the Java code called from a script are honored by a companion Java (JDWP) debug session</li>
+        </ul>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/debugger.png" width="700" alt="Debugger: variables and console at a breakpoint"/>
+        <br><br>
+        <b>File recognition &amp; injection</b>
+        <ul>
+            <li>Files with the <code>.bsh</code> extension</li>
+            <li>Extensionless scripts whose shebang launches BeanShell, including the self-executing polyglot (<code>#!/bin/sh</code> &hellip; <code>exec java bsh.Interpreter "$0"</code>)</li>
+            <li>Inline scripts in the <code>&lt;configuration&gt;</code> of several Maven plugins (beanshell-maven-plugin, maven-enforcer-plugin, build-helper-maven-plugin &mdash; the list is easy to extend)</li>
+            <li>Any XML element preceded by a <code>&lt;!--language=BeanShell--&gt;</code> comment</li>
+        </ul>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/maven-injection.png" width="700" alt="BeanShell injected into pom.xml"/>
+        <br><br>
+        <b>Known limitations</b>
+        <ul>
+            <li>The parser targets the 2.0b6 grammar; 3.0-only syntax (<code>**</code>, <code>??</code>, <code>&lt;=&gt;</code>, triple-quoted strings, word operators) is tokenized but not all of it is parsed</li>
+            <li>Java navigation is static: it follows types evident in the code (typed variable/parameter, <code>= new Type()</code>, class names) &mdash; generic element types, array indexing and runtime-only types are not inferred</li>
+            <li>On JDK 9+, BeanShell 2.0b6 cannot reflectively access some JDK-internal iterators, so <code>list.iterator().next()</code> / <code>for (x : list)</code> may fail at runtime &mdash; a property of the interpreter, not the plugin</li>
         </ul>
         ]]></description>
 

@@ -4,13 +4,15 @@ import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -134,7 +136,7 @@ public final class BshHook {
      * own right: {@code BSHBlock} would add a stop on the {@code {} of every braced body, and
      * {@code BSHSwitchLabel} is a {@code case} label, not a statement.
      */
-    private static final Set<String> NEVER_REPORTED = new HashSet<String>(Arrays.asList(
+    private static final Set<String> NEVER_REPORTED = new HashSet<>(Arrays.asList(
             "BSHBlock",
             "BSHSwitchLabel"));
 
@@ -254,10 +256,10 @@ public final class BshHook {
 
         /** Commands the reader thread has handed to this thread, in arrival order. */
         final BlockingQueue<DebugChannel.Command> mailbox =
-                new LinkedBlockingQueue<DebugChannel.Command>();
+                new LinkedBlockingQueue<>();
 
         /** Objects the IDE may expand, valid only for this thread's current stop. */
-        final Map<Integer, Object> handles = new HashMap<Integer, Object>();
+        final Map<Integer, Object> handles = new HashMap<>();
 
         /** The frames of this thread's current stop, innermost first. Empty while running. */
         Object[] frames = new Object[0];
@@ -285,7 +287,7 @@ public final class BshHook {
 
     /** Live thread states by protocol id, for the reader thread to dispatch into. */
     private static final Map<Integer, ThreadState> threadsById =
-            new ConcurrentHashMap<Integer, ThreadState>();
+            new ConcurrentHashMap<>();
 
     /**
      * This thread's state, created on first use.
@@ -293,7 +295,7 @@ public final class BshHook {
      * <p>A {@code ThreadLocal} rather than a lookup by {@code Thread.currentThread()} because
      * {@link #onEval} consults it on every instrumented node — the hottest path in the agent.
      */
-    private static final ThreadLocal<ThreadState> STATE = new ThreadLocal<ThreadState>();
+    private static final ThreadLocal<ThreadState> STATE = new ThreadLocal<>();
 
     private static final AtomicInteger nextThreadId = new AtomicInteger(1);
 
@@ -313,7 +315,7 @@ public final class BshHook {
      * overflowed. It stays set for the whole of {@link #report}, so everything served while
      * suspended is covered, including an expression that calls a script method.
      */
-    private static final ThreadLocal<Boolean> REPORTING = new ThreadLocal<Boolean>();
+    private static final ThreadLocal<Boolean> REPORTING = new ThreadLocal<>();
 
     /**
      * Serialises writes to the socket, and nothing else.
@@ -545,22 +547,24 @@ public final class BshHook {
         if (index < 0) {
             return false;
         }
-        if (IF_STATEMENT.equals(parentName) || SWITCH_STATEMENT.equals(parentName)) {
-            return index >= 1;
+        switch (parentName) {
+            case IF_STATEMENT:
+            case SWITCH_STATEMENT:
+                return index >= 1;
+            case FOR_STATEMENT:
+            case ENHANCED_FOR_STATEMENT:
+                return index == count - 1;
+            case WHILE_STATEMENT:
+                return isDoStatement(parent) ? index == 0 : index == count - 1;
+            default:
+                return false;
         }
-        if (FOR_STATEMENT.equals(parentName) || ENHANCED_FOR_STATEMENT.equals(parentName)) {
-            return index == count - 1;
-        }
-        if (WHILE_STATEMENT.equals(parentName)) {
-            return isDoStatement(parent) ? index == 0 : index == count - 1;
-        }
-        return false;
     }
 
     /** Identity search: nodes have no usable equals(), and the same subtree never repeats. */
     private static int indexOfChild(Object parent, Object child, int count) throws Exception {
         for (int i = 0; i < count; i++) {
-            if (nodeGetChild.invoke(parent, Integer.valueOf(i)) == child) {
+            if (nodeGetChild.invoke(parent, i) == child) {
                 return i;
             }
         }
@@ -612,15 +616,15 @@ public final class BshHook {
         if (configured == null || state.runMode != MODE_RUN) {
             return true;
         }
-        List<String> files = configured.get(Integer.valueOf(line));
+        List<String> files = configured.get(line);
         if (files == null) {
             return false;
         }
         if (sourceFile == null) {
             return false;
         }
-        for (int i = 0; i < files.size(); i++) {
-            if (pathsMatch(sourceFile, files.get(i))) {
+        for (String file : files) {
+            if (pathsMatch(sourceFile, file)) {
                 return true;
             }
         }
@@ -707,7 +711,7 @@ public final class BshHook {
                     default:
                         break;
                 }
-                ThreadState target = threadsById.get(Integer.valueOf(command.threadId));
+                ThreadState target = threadsById.get(command.threadId);
                 if (target == null) {
                     // A command for a thread that has exited. Dropping it is right: there is nobody
                     // to answer for it, and the client will have been told the thread is gone.
@@ -820,14 +824,10 @@ public final class BshHook {
 
     /** Replaces the breakpoint set with the one the client just sent. */
     private static void applyBreakpoints(DebugChannel.Command command) {
-        Map<Integer, List<String>> parsed = new HashMap<Integer, List<String>>();
+        Map<Integer, List<String>> parsed = new HashMap<>();
         for (int i = 0; i < command.breakpointLines.length; i++) {
-            Integer key = Integer.valueOf(command.breakpointLines[i]);
-            List<String> files = parsed.get(key);
-            if (files == null) {
-                files = new ArrayList<String>(2);
-                parsed.put(key, files);
-            }
+            Integer key = command.breakpointLines[i];
+            List<String> files = parsed.computeIfAbsent(key, k -> new ArrayList<>(2));
             files.add(command.breakpointFiles[i]);
         }
         // Published as a whole so a concurrent shouldReport() never sees a half-built map.
@@ -873,29 +873,20 @@ public final class BshHook {
         if (path == null || path.trim().isEmpty()) {
             return null;
         }
-        BufferedReader reader = null;
-        try {
-            reader = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"));
-            List<String> lines = new ArrayList<String>();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(Files.newInputStream(Paths.get(path)), StandardCharsets.UTF_8))) {
+            List<String> lines = new ArrayList<>();
             String line;
             while ((line = reader.readLine()) != null) {
                 if (!line.isEmpty()) {
                     lines.add(line);
                 }
             }
-            return lines.isEmpty() ? null : lines.toArray(new String[lines.size()]);
+            return lines.isEmpty() ? null : lines.toArray(new String[0]);
         } catch (IOException ex) {
             System.err.println("[bsh-agent] cannot read " + SOURCE_PREFIXES_FILE_PROPERTY + "='" + path
                     + "', reporting every source: " + ex);
             return null;
-        } finally {
-            if (reader != null) {
-                try {
-                    reader.close();
-                } catch (IOException ignored) {
-                    // Nothing useful to do about a failed close on a file we only read.
-                }
-            }
         }
     }
 
@@ -931,7 +922,7 @@ public final class BshHook {
         state.frames = frames;
         state.interpreter = interpreter;
         try {
-            List<DebugChannel.Frame> reported = new ArrayList<DebugChannel.Frame>(frames.length);
+            List<DebugChannel.Frame> reported = new ArrayList<>(frames.length);
             for (int i = 0; i < frames.length; i++) {
                 // Frame 0 sits at the statement being reported; every outer frame sits at the call
                 // site recorded by the frame below it. Reading getInvocationLine() off the frame
@@ -979,11 +970,7 @@ public final class BshHook {
                         + port + " (" + ex + "); aborting");
                 System.exit(EXIT_DEBUG_UNAVAILABLE);
             }
-            Thread reader = new Thread(new Runnable() {
-                public void run() {
-                    readerLoop();
-                }
-            }, "bsh-agent-reader");
+            Thread reader = new Thread(BshHook::readerLoop, "bsh-agent-reader");
             reader.setDaemon(true);
             reader.start();
         }
@@ -1038,7 +1025,7 @@ public final class BshHook {
         Thread current = Thread.currentThread();
         ThreadState created = new ThreadState(nextThreadId.getAndIncrement(), current.getName());
         STATE.set(created);
-        threadsById.put(Integer.valueOf(created.id), created);
+        threadsById.put(created.id, created);
         return created;
     }
 
@@ -1118,7 +1105,7 @@ public final class BshHook {
         Object namespace = frame(state, frameId);
         Object global = globalNameSpace(state);
         boolean hasGlobal = global != null && global != namespace;
-        List<DebugChannel.Scope> scopes = new ArrayList<DebugChannel.Scope>(2);
+        List<DebugChannel.Scope> scopes = new ArrayList<>(2);
         if (namespace != null) {
             scopes.add(new DebugChannel.Scope("Locals", handleFor(state, namespace)));
         }
@@ -1132,9 +1119,9 @@ public final class BshHook {
      * The children of one handle, each with a handle of its own when it can be expanded further.
      */
     private static List<DebugChannel.Variable> collectVariables(ThreadState state, int handle) {
-        Object target = state.handles.get(Integer.valueOf(handle));
-        List<String[]> children = new ArrayList<String[]>();
-        List<Object> values = new ArrayList<Object>();
+        Object target = state.handles.get(handle);
+        List<String[]> children = new ArrayList<>();
+        List<Object> values = new ArrayList<>();
         try {
             if (isNameSpace(target)) {
                 collectNamespace(target, children, values);
@@ -1155,7 +1142,7 @@ public final class BshHook {
         } catch (Throwable ignored) {
             // Send whatever was gathered; an unreadable object is not worth failing the session.
         }
-        List<DebugChannel.Variable> variables = new ArrayList<DebugChannel.Variable>(children.size());
+        List<DebugChannel.Variable> variables = new ArrayList<>(children.size());
         for (int i = 0; i < children.size(); i++) {
             String[] entry = children.get(i);
             variables.add(new DebugChannel.Variable(entry[0], entry[1], entry[2],
@@ -1242,7 +1229,7 @@ public final class BshHook {
         if (frame(state, frameId) == null) {
             return Outcome.failed("No frame " + frameId + " at this stop");
         }
-        Object target = state.handles.get(Integer.valueOf(handle));
+        Object target = state.handles.get(handle);
         if (target == null) {
             return Outcome.failed("This value is no longer available");
         }
@@ -1407,7 +1394,7 @@ public final class BshHook {
      */
     private static void collectNamespace(Object namespace, List<String[]> children, List<Object> values)
             throws Exception {
-        Set<String> seen = new HashSet<String>();
+        Set<String> seen = new HashSet<>();
         while (namespace != null) {
             Object names = nameSpaceGetVariableNames.invoke(namespace);
             if (names instanceof String[]) {
@@ -1439,8 +1426,7 @@ public final class BshHook {
         }
         if (target instanceof Map) {
             int i = 0;
-            for (Object o : ((Map<?, ?>) target).entrySet()) {
-                Map.Entry<?, ?> entry = (Map.Entry<?, ?>) o;
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) target).entrySet()) {
                 add(children, values, String.valueOf(entry.getKey()), entry.getValue());
                 if (++i >= MAX_CHILDREN) {
                     break;
@@ -1551,7 +1537,7 @@ public final class BshHook {
     }
 
     private static boolean isNameSpace(Object candidate) {
-        return candidate != null && nameSpaceClass != null && nameSpaceClass.isInstance(candidate);
+        return nameSpaceClass != null && nameSpaceClass.isInstance(candidate);
     }
 
     /**
@@ -1565,7 +1551,7 @@ public final class BshHook {
      * Java.
      */
     private static boolean isThis(Object candidate) {
-        return candidate != null && thisClass != null && thisClass.isInstance(candidate);
+        return thisClass != null && thisClass.isInstance(candidate);
     }
 
     /**
@@ -1609,11 +1595,11 @@ public final class BshHook {
     private static int handleFor(ThreadState state, Object value) {
         for (Map.Entry<Integer, Object> entry : state.handles.entrySet()) {
             if (entry.getValue() == value) {
-                return entry.getKey().intValue();
+                return entry.getKey();
             }
         }
         int handle = nextHandle.getAndIncrement();
-        state.handles.put(Integer.valueOf(handle), value);
+        state.handles.put(handle, value);
         return handle;
     }
 

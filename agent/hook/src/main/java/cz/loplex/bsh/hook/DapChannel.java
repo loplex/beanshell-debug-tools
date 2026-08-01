@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,7 +65,7 @@ final class DapChannel implements DebugChannel {
     private final AtomicInteger nextSeq = new AtomicInteger(1);
 
     /** Breakpoints per source path, since DAP replaces a whole source's set at a time. */
-    private final Map<String, int[]> breakpointsBySource = new ConcurrentHashMap<String, int[]>();
+    private final Map<String, int[]> breakpointsBySource = new ConcurrentHashMap<>();
 
     /**
      * The stack most recently reported per thread, so {@code stackTrace} can be answered from it.
@@ -73,10 +74,10 @@ final class DapChannel implements DebugChannel {
      * native protocol sends it inline. Remembering it here is what bridges that, and it costs nothing:
      * it is the same list that was just sent.
      */
-    private final Map<Integer, List<Frame>> stacks = new ConcurrentHashMap<Integer, List<Frame>>();
+    private final Map<Integer, List<Frame>> stacks = new ConcurrentHashMap<>();
 
     /** Thread names, for the {@code threads} request, which may arrive at any time. */
-    private final Map<Integer, String> threadNames = new ConcurrentHashMap<Integer, String>();
+    private final Map<Integer, String> threadNames = new ConcurrentHashMap<>();
 
     /**
      * DAP request seq per pending hook request id, so a reply can be addressed to the right request.
@@ -84,7 +85,7 @@ final class DapChannel implements DebugChannel {
      * <p>The hook's request ids and DAP's {@code seq} numbers are different namespaces, and both ends
      * insist on their own, so one map is unavoidable.
      */
-    private final Map<Integer, Pending> pending = new ConcurrentHashMap<Integer, Pending>();
+    private final Map<Integer, Pending> pending = new ConcurrentHashMap<>();
 
     private final AtomicInteger nextRequestId = new AtomicInteger(1);
 
@@ -141,68 +142,67 @@ final class DapChannel implements DebugChannel {
 
     public void sendStopped(int threadId, String threadName, int line, int callDepth, List<Frame> frames)
             throws IOException {
-        boolean firstSighting = threadNames.put(Integer.valueOf(threadId), threadName) == null;
-        stacks.put(Integer.valueOf(threadId), frames);
+        boolean firstSighting = threadNames.put(threadId, threadName) == null;
+        stacks.put(threadId, frames);
         if (firstSighting) {
             // DAP clients build their thread list from these; a thread that never announces itself may
             // not be selectable. Sent before the stop so the client knows the thread it names.
-            Map<String, Object> body = new LinkedHashMap<String, Object>();
+            Map<String, Object> body = new LinkedHashMap<>();
             body.put("reason", "started");
-            body.put("threadId", Integer.valueOf(threadId));
+            body.put("threadId", threadId);
             sendEvent("thread", body);
         }
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        Map<String, Object> body = new LinkedHashMap<>();
         // "breakpoint" vs "step" is the client's cue for how to present the stop. The hook does not
         // distinguish, and guessing wrong is cosmetic, so the honest generic reason is used.
         body.put("reason", "pause");
-        body.put("threadId", Integer.valueOf(threadId));
+        body.put("threadId", threadId);
         body.put("allThreadsStopped", Boolean.FALSE);
         sendEvent("stopped", body);
     }
 
     public void sendScopes(int requestId, List<Scope> scopes) throws IOException {
-        Pending request = pending.remove(Integer.valueOf(requestId));
+        Pending request = pending.remove(requestId);
         if (request == null) {
             return;
         }
-        List<Object> rendered = new ArrayList<Object>();
-        for (int i = 0; i < scopes.size(); i++) {
-            Map<String, Object> scope = new LinkedHashMap<String, Object>();
-            scope.put("name", scopes.get(i).name);
-            scope.put("variablesReference", Integer.valueOf(scopes.get(i).handle));
+        List<Object> rendered = new ArrayList<>();
+        for (Scope item : scopes) {
+            Map<String, Object> scope = new LinkedHashMap<>();
+            scope.put("name", item.name);
+            scope.put("variablesReference", item.handle);
             // Locals is worth expanding on arrival; Global usually is not, and saying so keeps a
             // client from opening a large namespace nobody asked about.
-            scope.put("expensive", Boolean.valueOf(!"Locals".equals(scopes.get(i).name)));
+            scope.put("expensive", !"Locals".equals(item.name));
             rendered.add(scope);
         }
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        Map<String, Object> body = new LinkedHashMap<>();
         body.put("scopes", rendered);
         sendResponse(request.seq, request.command, true, body, null);
     }
 
     public void sendVariables(int requestId, List<Variable> variables) throws IOException {
-        Pending request = pending.remove(Integer.valueOf(requestId));
+        Pending request = pending.remove(requestId);
         if (request == null) {
             return;
         }
-        List<Object> rendered = new ArrayList<Object>();
-        for (int i = 0; i < variables.size(); i++) {
-            Variable variable = variables.get(i);
-            Map<String, Object> entry = new LinkedHashMap<String, Object>();
+        List<Object> rendered = new ArrayList<>();
+        for (Variable variable : variables) {
+            Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("name", variable.name);
             entry.put("value", variable.value);
             entry.put("type", variable.type);
-            entry.put("variablesReference", Integer.valueOf(variable.childHandle));
+            entry.put("variablesReference", variable.childHandle);
             rendered.add(entry);
         }
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        Map<String, Object> body = new LinkedHashMap<>();
         body.put("variables", rendered);
         sendResponse(request.seq, request.command, true, body, null);
     }
 
     public void sendEvaluated(int requestId, boolean setVariable, boolean ok, String value, String type,
             int childHandle) throws IOException {
-        Pending request = pending.remove(Integer.valueOf(requestId));
+        Pending request = pending.remove(requestId);
         if (request == null) {
             return;
         }
@@ -213,11 +213,11 @@ final class DapChannel implements DebugChannel {
             sendResponse(request.seq, request.command, false, null, value);
             return;
         }
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        Map<String, Object> body = new LinkedHashMap<>();
         // setVariable's body calls it "value"; evaluate's calls it "result".
         body.put(setVariable ? "value" : "result", value);
         body.put("type", type);
-        body.put("variablesReference", Integer.valueOf(childHandle));
+        body.put("variablesReference", childHandle);
         sendResponse(request.seq, request.command, true, body, null);
     }
 
@@ -276,7 +276,7 @@ final class DapChannel implements DebugChannel {
         }
         if ("continue".equals(command)) {
             int threadId = Json.getInt(args, "threadId", lastStoppedThread());
-            Map<String, Object> body = new LinkedHashMap<String, Object>();
+            Map<String, Object> body = new LinkedHashMap<>();
             body.put("allThreadsContinued", Boolean.FALSE);
             sendResponse(seq, command, true, body, null);
             return Command.simple(Command.Kind.RESUME, threadId);
@@ -302,7 +302,7 @@ final class DapChannel implements DebugChannel {
     }
 
     private Command handleInitialize(int seq, String command) throws IOException {
-        Map<String, Object> capabilities = new LinkedHashMap<String, Object>();
+        Map<String, Object> capabilities = new LinkedHashMap<>();
         // Only what is actually true. A capability claimed and then not delivered is worse than one
         // never claimed: the client builds UI for it and the user finds it broken.
         capabilities.put("supportsConfigurationDoneRequest", Boolean.TRUE);
@@ -314,7 +314,7 @@ final class DapChannel implements DebugChannel {
         sendResponse(seq, command, true, capabilities, null);
         // DAP requires this before the client may send breakpoints. The order matters: a client that
         // has not seen `initialized` will not configure anything.
-        sendEvent("initialized", new LinkedHashMap<String, Object>());
+        sendEvent("initialized", new LinkedHashMap<>());
         return Command.simple(Command.Kind.HANDLED, 0);
     }
 
@@ -324,21 +324,21 @@ final class DapChannel implements DebugChannel {
         List<Object> requested = Json.getList(args, "breakpoints");
 
         int[] lines = new int[requested.size()];
-        List<Object> verified = new ArrayList<Object>();
+        List<Object> verified = new ArrayList<>();
         for (int i = 0; i < requested.size(); i++) {
             lines[i] = Json.getInt(requested.get(i), "line", 0);
-            Map<String, Object> entry = new LinkedHashMap<String, Object>();
+            Map<String, Object> entry = new LinkedHashMap<>();
             // Claimed verified without checking: the agent has no parse tree for the file and cannot
             // know whether a line holds a statement until execution reaches it. Reporting them all as
             // verified is the honest answer to "I cannot tell", and matches what the native protocol
             // does -- the IDE decides placement there too.
             entry.put("verified", Boolean.TRUE);
-            entry.put("line", Integer.valueOf(lines[i]));
+            entry.put("line", lines[i]);
             verified.add(entry);
         }
         breakpointsBySource.put(path, lines);
 
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        Map<String, Object> body = new LinkedHashMap<>();
         body.put("breakpoints", verified);
         sendResponse(seq, command, true, body, null);
 
@@ -362,14 +362,14 @@ final class DapChannel implements DebugChannel {
     }
 
     private Command handleThreads(int seq, String command) throws IOException {
-        List<Object> rendered = new ArrayList<Object>();
+        List<Object> rendered = new ArrayList<>();
         for (Map.Entry<Integer, String> entry : threadNames.entrySet()) {
-            Map<String, Object> thread = new LinkedHashMap<String, Object>();
+            Map<String, Object> thread = new LinkedHashMap<>();
             thread.put("id", entry.getKey());
             thread.put("name", entry.getValue());
             rendered.add(thread);
         }
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        Map<String, Object> body = new LinkedHashMap<>();
         body.put("threads", rendered);
         sendResponse(seq, command, true, body, null);
         return Command.simple(Command.Kind.HANDLED, 0);
@@ -384,18 +384,18 @@ final class DapChannel implements DebugChannel {
      */
     private Command handleStackTrace(int seq, String command, Object args) throws IOException {
         int threadId = Json.getInt(args, "threadId", lastStoppedThread());
-        List<Frame> frames = stacks.get(Integer.valueOf(threadId));
-        List<Object> rendered = new ArrayList<Object>();
+        List<Frame> frames = stacks.get(threadId);
+        List<Object> rendered = new ArrayList<>();
         if (frames != null) {
             for (int i = 0; i < frames.size(); i++) {
                 Frame frame = frames.get(i);
-                Map<String, Object> entry = new LinkedHashMap<String, Object>();
-                entry.put("id", Integer.valueOf(threadId * FRAME_ID_STRIDE + i));
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("id", threadId * FRAME_ID_STRIDE + i);
                 entry.put("name", frame.name.isEmpty() ? "?" : frame.name);
-                entry.put("line", Integer.valueOf(frame.line));
-                entry.put("column", Integer.valueOf(1));
+                entry.put("line", frame.line);
+                entry.put("column", 1);
                 if (!frame.sourceFile.isEmpty()) {
-                    Map<String, Object> source = new LinkedHashMap<String, Object>();
+                    Map<String, Object> source = new LinkedHashMap<>();
                     source.put("path", frame.sourceFile);
                     source.put("name", shortName(frame.sourceFile));
                     entry.put("source", source);
@@ -403,14 +403,14 @@ final class DapChannel implements DebugChannel {
                 rendered.add(entry);
             }
         }
-        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        Map<String, Object> body = new LinkedHashMap<>();
         body.put("stackFrames", rendered);
-        body.put("totalFrames", Integer.valueOf(rendered.size()));
+        body.put("totalFrames", rendered.size());
         sendResponse(seq, command, true, body, null);
         return Command.simple(Command.Kind.HANDLED, 0);
     }
 
-    private Command handleSetVariable(int seq, String command, Object args) throws IOException {
+    private Command handleSetVariable(int seq, String command, Object args) {
         int reference = Json.getInt(args, "variablesReference", 0);
         String name = Json.getString(args, "name", "");
         String value = Json.getString(args, "value", "");
@@ -470,7 +470,7 @@ final class DapChannel implements DebugChannel {
 
     private Command register(int seq, String command, Command hookCommand) {
         int requestId = nextRequestId.getAndIncrement();
-        pending.put(Integer.valueOf(requestId), new Pending(seq, command));
+        pending.put(requestId, new Pending(seq, command));
         return withRequestId(hookCommand, requestId);
     }
 
@@ -496,8 +496,8 @@ final class DapChannel implements DebugChannel {
         // thread it is exact; with several, a client that means another one says so explicitly.
         int candidate = 0;
         for (Integer id : stacks.keySet()) {
-            if (id.intValue() > candidate) {
-                candidate = id.intValue();
+            if (id > candidate) {
+                candidate = id;
             }
         }
         return candidate;
@@ -517,8 +517,8 @@ final class DapChannel implements DebugChannel {
     }
 
     private void sendEvent(String event, Map<String, Object> body) throws IOException {
-        Map<String, Object> message = new LinkedHashMap<String, Object>();
-        message.put("seq", Integer.valueOf(nextSeq.getAndIncrement()));
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("seq", nextSeq.getAndIncrement());
         message.put("type", "event");
         message.put("event", event);
         message.put("body", body);
@@ -527,11 +527,11 @@ final class DapChannel implements DebugChannel {
 
     private void sendResponse(int requestSeq, String command, boolean success, Map<String, Object> body,
             String message) throws IOException {
-        Map<String, Object> response = new LinkedHashMap<String, Object>();
-        response.put("seq", Integer.valueOf(nextSeq.getAndIncrement()));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("seq", nextSeq.getAndIncrement());
         response.put("type", "response");
-        response.put("request_seq", Integer.valueOf(requestSeq));
-        response.put("success", Boolean.valueOf(success));
+        response.put("request_seq", requestSeq);
+        response.put("success", success);
         response.put("command", command);
         if (message != null) {
             response.put("message", message);
@@ -543,10 +543,10 @@ final class DapChannel implements DebugChannel {
     }
 
     private void send(Map<String, Object> message) throws IOException {
-        byte[] payload = Json.write(message).getBytes("UTF-8");
+        byte[] payload = Json.write(message).getBytes(StandardCharsets.UTF_8);
         // Content-Length framing, as DAP specifies: the length counts bytes, not characters, which is
         // why the payload is encoded before it is measured.
-        byte[] header = ("Content-Length: " + payload.length + "\r\n\r\n").getBytes("UTF-8");
+        byte[] header = ("Content-Length: " + payload.length + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
         synchronized (writeLock) {
             out.write(header);
             out.write(payload);
@@ -587,7 +587,7 @@ final class DapChannel implements DebugChannel {
             }
             read += count;
         }
-        String text = new String(payload, "UTF-8");
+        String text = new String(payload, StandardCharsets.UTF_8);
         try {
             return Json.parse(text);
         } catch (RuntimeException malformed) {

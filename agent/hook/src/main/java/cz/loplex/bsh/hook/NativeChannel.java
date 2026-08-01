@@ -80,8 +80,7 @@ final class NativeChannel implements DebugChannel {
             out.writeInt(line);
             out.writeInt(callDepth);
             out.writeInt(frames.size());
-            for (int i = 0; i < frames.size(); i++) {
-                Frame frame = frames.get(i);
+            for (Frame frame : frames) {
                 out.writeUTF(frame.name);
                 out.writeUTF(frame.sourceFile);
                 out.writeInt(frame.line);
@@ -95,9 +94,9 @@ final class NativeChannel implements DebugChannel {
             out.writeByte(EVT_SCOPES);
             out.writeInt(requestId);
             out.writeInt(scopes.size());
-            for (int i = 0; i < scopes.size(); i++) {
-                out.writeUTF(scopes.get(i).name);
-                out.writeInt(scopes.get(i).handle);
+            for (Scope scope : scopes) {
+                out.writeUTF(scope.name);
+                out.writeInt(scope.handle);
             }
             out.flush();
         }
@@ -108,8 +107,7 @@ final class NativeChannel implements DebugChannel {
             out.writeByte(EVT_VARIABLES);
             out.writeInt(requestId);
             out.writeInt(variables.size());
-            for (int i = 0; i < variables.size(); i++) {
-                Variable variable = variables.get(i);
+            for (Variable variable : variables) {
                 out.writeUTF(variable.name);
                 out.writeUTF(variable.value);
                 out.writeUTF(variable.type);

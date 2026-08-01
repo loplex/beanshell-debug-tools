@@ -44,7 +44,7 @@ final class Json {
         } else if (value instanceof String) {
             writeString(sb, (String) value);
         } else if (value instanceof Boolean) {
-            sb.append(((Boolean) value).booleanValue() ? "true" : "false");
+            sb.append(value);
         } else if (value instanceof Integer || value instanceof Long) {
             sb.append(value);
         } else if (value instanceof Number) {
@@ -62,8 +62,7 @@ final class Json {
         } else if (value instanceof Map) {
             sb.append('{');
             boolean first = true;
-            for (Object entryObject : ((Map<?, ?>) value).entrySet()) {
-                Map.Entry<?, ?> entry = (Map.Entry<?, ?>) entryObject;
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 if (!first) {
                     sb.append(',');
                 }
@@ -121,7 +120,7 @@ final class Json {
                     // Control characters must be escaped; a script's own value may well contain them.
                     // Everything else goes out as-is and is UTF-8 encoded by the writer.
                     if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", Integer.valueOf(c)));
+                        sb.append(String.format("\\u%04x", (int) c));
                     } else {
                         sb.append(c);
                     }
@@ -165,14 +164,14 @@ final class Json {
     /** A member as a boolean, or [fallback] when absent or not a boolean. */
     static boolean getBoolean(Object object, String key, boolean fallback) {
         Object value = get(object, key);
-        return value instanceof Boolean ? ((Boolean) value).booleanValue() : fallback;
+        return value instanceof Boolean ? (Boolean) value : fallback;
     }
 
     /** A member as a list, or an empty list when absent or not an array. */
     @SuppressWarnings("unchecked")
     static List<Object> getList(Object object, String key) {
         Object value = get(object, key);
-        return value instanceof List ? (List<Object>) value : new ArrayList<Object>();
+        return value instanceof List ? (List<Object>) value : new ArrayList<>();
     }
 
     private static final class Parser {
@@ -222,7 +221,7 @@ final class Json {
         }
 
         private Map<String, Object> object() {
-            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            Map<String, Object> result = new LinkedHashMap<>();
             position++;  // '{'
             skipWhitespace();
             if (peek() == '}') {
@@ -252,7 +251,7 @@ final class Json {
         }
 
         private List<Object> array() {
-            List<Object> result = new ArrayList<Object>();
+            List<Object> result = new ArrayList<>();
             position++;  // '['
             skipWhitespace();
             if (peek() == ']') {

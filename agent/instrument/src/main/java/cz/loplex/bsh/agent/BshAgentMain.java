@@ -1,11 +1,11 @@
 package cz.loplex.bsh.agent;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.instrument.Instrumentation;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.jar.JarFile;
@@ -112,15 +112,12 @@ public final class BshAgentMain {
         try {
             File extracted = File.createTempFile("bsh-debug-hook", ".jar");
             extracted.deleteOnExit();
-            OutputStream target = new FileOutputStream(extracted);
-            try {
+            try (OutputStream target = Files.newOutputStream(extracted.toPath())) {
                 byte[] buffer = new byte[8192];
                 int read;
                 while ((read = source.read(buffer)) > 0) {
                     target.write(buffer, 0, read);
                 }
-            } finally {
-                target.close();
             }
             inst.appendToBootstrapClassLoaderSearch(new JarFile(extracted));
             return true;
@@ -145,7 +142,7 @@ public final class BshAgentMain {
         if (!inst.isRetransformClassesSupported()) {
             return;
         }
-        List<Class<?>> targets = new ArrayList<Class<?>>();
+        List<Class<?>> targets = new ArrayList<>();
         for (Class<?> candidate : inst.getAllLoadedClasses()) {
             if (isBshClass(candidate) && inst.isModifiableClass(candidate)) {
                 targets.add(candidate);

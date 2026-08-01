@@ -37,10 +37,8 @@ class BshFileTypeDetector : FileTypeRegistry.FileTypeDetector {
     }
 
     override fun getDesiredContentPrefixLength(): Int = 256
-
-    companion object {
-        private const val MAX_HEADER_LINES = 6
-        private val INTERPRETER = Regex("""\bbsh\.Interpreter\b""")
-        private val INTERPRETER_NAME = Regex("""\b(?:beanshell|bsh)\b""", RegexOption.IGNORE_CASE)
-    }
 }
+
+private const val MAX_HEADER_LINES = 6
+private val INTERPRETER = Regex("""\bbsh\.Interpreter\b""")
+private val INTERPRETER_NAME = Regex("""\b(?:beanshell|bsh)\b""", RegexOption.IGNORE_CASE)

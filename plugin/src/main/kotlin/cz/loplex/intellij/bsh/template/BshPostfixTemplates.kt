@@ -15,9 +15,9 @@ import cz.loplex.intellij.bsh.psi.BshElementTypes as E
 class BshPostfixTemplateProvider : PostfixTemplateProvider {
 
     private val templateSet: Set<PostfixTemplate> = setOf(
-        BshStringPostfixTemplate("sout", "print(expr);", "print(\$expr\$);\$END\$", this),
-        BshStringPostfixTemplate("if", "if (expr) {...}", "if (\$expr\$) {\n\$END\$\n}", this),
-        BshStringPostfixTemplate("while", "while (expr) {...}", "while (\$expr\$) {\n\$END\$\n}", this),
+        BshStringPostfixTemplate("sout", "print(expr);", $$"print($expr$);$END$", this),
+        BshStringPostfixTemplate("if", "if (expr) {...}", $$"if ($expr$) {\n$END$\n}", this),
+        BshStringPostfixTemplate("while", "while (expr) {...}", $$"while ($expr$) {\n$END$\n}", this),
     )
 
     override fun getTemplates(): Set<PostfixTemplate> = templateSet

@@ -47,8 +47,6 @@ class BshParserDefinition : ParserDefinition {
     }
 
     override fun createFile(viewProvider: FileViewProvider): PsiFile = BshFile(viewProvider)
-
-    companion object {
-        val FILE = IFileElementType(BshLanguage)
-    }
 }
+
+val FILE = IFileElementType(BshLanguage)

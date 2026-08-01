@@ -44,7 +44,6 @@ object BshScopes {
         if (significant.size != 1 || significant[0] !== name.node) return false
 
         val assignment = primary.parent ?: return false
-        if (assignment.node.elementType !== E.ASSIGNMENT) return false
-        return assignment.node.firstChildNode === primary.node
+        return assignment.node.elementType === E.ASSIGNMENT && assignment.node.firstChildNode === primary.node
     }
 }

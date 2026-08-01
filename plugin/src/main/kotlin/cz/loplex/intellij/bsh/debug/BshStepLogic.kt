@@ -11,8 +11,7 @@ enum class BshStepMode { RUN, INTO, OVER, OUT }
  */
 object BshStepLogic {
     fun shouldPause(mode: BshStepMode, stepDepth: Int, currentDepth: Int, atBreakpoint: Boolean): Boolean {
-        if (atBreakpoint) return true
-        return when (mode) {
+        return atBreakpoint || when (mode) {
             BshStepMode.RUN -> false
             BshStepMode.INTO -> true                     // next statement, wherever it is
             BshStepMode.OVER -> currentDepth <= stepDepth // skip descents into called methods

@@ -38,9 +38,8 @@ class BshMavenCreateRunConfigurationAction : AnAction() {
 
         val name = "${mavenProject.mavenId.artifactId ?: "maven"} [${goals.joinToString(" ")}] (bsh)"
         val settings = runManager.createConfiguration(name, factory)
-        (settings.configuration as BshMavenRunConfiguration).setRunnerParameters(
-            MavenRunnerParameters(false, mavenProject.directory, mavenProject.file.name, goals, emptyList<String>(), emptyList<String>()),
-        )
+        (settings.configuration as BshMavenRunConfiguration).runnerParameters =
+            MavenRunnerParameters(false, mavenProject.directory, mavenProject.file.name, goals, emptyList<String>(), emptyList<String>())
 
         if (RunDialog.editConfiguration(project, settings, "Create BeanShell-Enhanced Maven Configuration")) {
             runManager.addConfiguration(settings)

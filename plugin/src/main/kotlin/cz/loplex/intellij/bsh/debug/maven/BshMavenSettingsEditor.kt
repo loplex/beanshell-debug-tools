@@ -20,7 +20,7 @@ import javax.swing.JComponent
  */
 class BshMavenSettingsEditor : SettingsEditor<BshMavenRunConfiguration>() {
 
-    private val instrumentation = ComboBox(BshInstrumentationMode.values()).apply {
+    private val instrumentation = ComboBox(BshInstrumentationMode.entries.toTypedArray()).apply {
         renderer = SimpleListCellRenderer.create("") { it.label }
     }
 

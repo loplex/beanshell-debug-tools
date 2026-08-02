@@ -183,14 +183,14 @@ tasks.named<Zip>("buildPlugin") {
 val mavenExt: SourceSet = sourceSets.create("mavenExt")
 
 dependencies {
-    "mavenExtCompileOnly"("org.apache.maven:maven-core:3.6.3")
-    "mavenExtCompileOnly"("org.codehaus.plexus:plexus-utils:3.3.0")
+    "mavenExtCompileOnly"("org.apache.maven:maven-core:3.9.16")
+    "mavenExtCompileOnly"("org.codehaus.plexus:plexus-utils:3.6.1")
     "mavenExtCompileOnly"("javax.inject:javax.inject:1")
 
     // Unit-test the extension's model surgery against the light Maven model (no maven-core).
     testImplementation(mavenExt.output)
-    testImplementation("org.apache.maven:maven-model:3.6.3")
-    testImplementation("org.codehaus.plexus:plexus-utils:3.3.0")
+    testImplementation("org.apache.maven:maven-model:3.9.16")
+    testImplementation("org.codehaus.plexus:plexus-utils:3.6.1")
 }
 
 tasks.named<JavaCompile>("compileMavenExtJava") {

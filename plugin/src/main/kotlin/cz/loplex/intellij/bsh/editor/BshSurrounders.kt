@@ -48,17 +48,17 @@ abstract class BshSurrounderBase : Surrounder {
 }
 
 class BshIfSurrounder : BshSurrounderBase() {
-    override fun getTemplateDescription(): String = "if"
+    override fun getTemplateDescription(): String = "If"
     override fun wrap(body: String): Pair<String, Int> = "if () {\n$body\n}" to "if (".length
 }
 
 class BshWhileSurrounder : BshSurrounderBase() {
-    override fun getTemplateDescription(): String = "while"
+    override fun getTemplateDescription(): String = "While"
     override fun wrap(body: String): Pair<String, Int> = "while () {\n$body\n}" to "while (".length
 }
 
 class BshTrySurrounder : BshSurrounderBase() {
-    override fun getTemplateDescription(): String = "try / catch"
+    override fun getTemplateDescription(): String = "Try / Catch"
     override fun wrap(body: String): Pair<String, Int> {
         val text = "try {\n$body\n} catch (e) {\n}"
         return text to text.length - 1 // caret inside the catch block

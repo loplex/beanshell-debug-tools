@@ -247,7 +247,7 @@ class BshParser : PsiParser {
             return
         }
         m.drop()
-        b.error("parameter expected")
+        b.error("Parameter expected")
     }
 
     private fun parseVariableDeclarator() {
@@ -288,7 +288,7 @@ class BshParser : PsiParser {
                 consume()
                 if (atText(":")) {
                     consume()
-                    if (!parseStatement()) b.error("statement expected")
+                    if (!parseStatement()) b.error("Statement expected")
                     m.done(E.LABELED_STATEMENT)
                     return true
                 }
@@ -346,10 +346,10 @@ class BshParser : PsiParser {
         val m = b.mark()
         consume() // if
         expect(T.LPAREN, "("); parseExpressionOrError(); expect(T.RPAREN, ")")
-        if (!parseStatement()) b.error("statement expected")
+        if (!parseStatement()) b.error("Statement expected")
         if (isKeywordText("else")) {
             consume()
-            if (!parseStatement()) b.error("statement expected")
+            if (!parseStatement()) b.error("Statement expected")
         }
         m.done(E.IF_STATEMENT)
         return true
@@ -359,7 +359,7 @@ class BshParser : PsiParser {
         val m = b.mark()
         consume() // while
         expect(T.LPAREN, "("); parseExpressionOrError(); expect(T.RPAREN, ")")
-        if (!parseStatement()) b.error("statement expected")
+        if (!parseStatement()) b.error("Statement expected")
         m.done(E.WHILE_STATEMENT)
         return true
     }
@@ -367,7 +367,7 @@ class BshParser : PsiParser {
     private fun parseDo(): Boolean {
         val m = b.mark()
         consume() // do
-        if (!parseStatement()) b.error("statement expected")
+        if (!parseStatement()) b.error("Statement expected")
         expectText("while")
         expect(T.LPAREN, "("); parseExpressionOrError(); expect(T.RPAREN, ")")
         expect(T.SEMICOLON, ";")
@@ -396,7 +396,7 @@ class BshParser : PsiParser {
         expectText(":")
         parseExpressionOrError()
         expect(T.RPAREN, ")")
-        if (!parseStatement()) b.error("statement expected")
+        if (!parseStatement()) b.error("Statement expected")
         m2.done(E.ENHANCED_FOR_STATEMENT)
         return true
     }
@@ -519,7 +519,7 @@ class BshParser : PsiParser {
     // ---------------------------------------------------------------------
 
     private fun parseExpressionOrError() {
-        if (!parseExpression()) b.error("expression expected")
+        if (!parseExpression()) b.error("Expression expected")
     }
 
     private fun parseExpression(): Boolean {
@@ -545,7 +545,7 @@ class BshParser : PsiParser {
             consume()
             parseExpressionOrError()
             expectText(":")
-            if (!parseConditionalExpression()) b.error("expression expected")
+            if (!parseConditionalExpression()) b.error("Expression expected")
             m.done(E.TERNARY_EXPRESSION)
         } else {
             m.drop()
@@ -565,7 +565,7 @@ class BshParser : PsiParser {
         if (!parseRelational()) { m.drop(); return false }
         if (isKeywordText("instanceof")) {
             consume()
-            if (!parseType()) b.error("type expected")
+            if (!parseType()) b.error("Type expected")
             m.done(E.BINARY_EXPRESSION)
         } else {
             m.drop()
@@ -583,7 +583,7 @@ class BshParser : PsiParser {
         if (!next()) { m.drop(); return false }
         while (at(T.OPERATOR) && b.tokenText in ops) {
             consume()
-            if (!next()) b.error("expression expected")
+            if (!next()) b.error("Expression expected")
             m.done(E.BINARY_EXPRESSION)
             m = m.precede()
         }
@@ -594,12 +594,12 @@ class BshParser : PsiParser {
     private fun parseUnary(): Boolean {
         if (atText("+") || atText("-")) {
             val m = b.mark(); consume()
-            if (!parseUnary()) b.error("expression expected")
+            if (!parseUnary()) b.error("Expression expected")
             m.done(E.UNARY_EXPRESSION); return true
         }
         if (atText("++") || atText("--")) {
             val m = b.mark(); consume()
-            if (!parsePrimaryExpression()) b.error("expression expected")
+            if (!parsePrimaryExpression()) b.error("Expression expected")
             m.done(E.UNARY_EXPRESSION); return true
         }
         return parseUnaryNotPlusMinus()
@@ -608,7 +608,7 @@ class BshParser : PsiParser {
     private fun parseUnaryNotPlusMinus(): Boolean {
         if (atText("~") || atText("!")) {
             val m = b.mark(); consume()
-            if (!parseUnary()) b.error("expression expected")
+            if (!parseUnary()) b.error("Expression expected")
             m.done(E.UNARY_EXPRESSION); return true
         }
         if (tryCast()) return true
@@ -698,7 +698,7 @@ class BshParser : PsiParser {
                 return true
             }
             consume() // .
-            if (atText("class")) consume() else b.error("identifier or 'class' expected")
+            if (atText("class")) consume() else b.error("Identifier or 'class' expected")
             return true
         }
         if (at(T.LBRACKET)) {
@@ -733,7 +733,7 @@ class BshParser : PsiParser {
                 else -> b.error("'(' or '[' expected")
             }
         } else {
-            b.error("type expected")
+            b.error("Type expected")
         }
         m.done(E.ALLOCATION_EXPRESSION)
         return true

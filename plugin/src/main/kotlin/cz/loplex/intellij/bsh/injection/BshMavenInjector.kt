@@ -92,6 +92,7 @@ class BshMavenInjector : MultiHostInjector {
         return false
     }
 
+    @Suppress("SameParameterValue")
     private fun childValue(tag: XmlTag, name: String): String? =
         tag.findFirstSubTag(name)?.value?.trimmedText
 }

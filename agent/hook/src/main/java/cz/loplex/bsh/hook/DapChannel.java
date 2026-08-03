@@ -321,7 +321,7 @@ final class DapChannel implements DebugChannel {
     private Command handleSetBreakpoints(int seq, String command, Object args) throws IOException {
         Object source = Json.get(args, "source");
         String path = Json.getString(source, "path", Json.getString(source, "name", ""));
-        List<Object> requested = Json.getList(args, "breakpoints");
+        List<?> requested = Json.getList(args, "breakpoints");
 
         int[] lines = new int[requested.size()];
         List<Object> verified = new ArrayList<>();

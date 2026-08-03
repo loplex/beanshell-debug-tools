@@ -27,18 +27,18 @@ export class BshConfigurationProvider implements vscode.DebugConfigurationProvid
 
         if (config.request === 'launch') {
             if (!config.script) {
-                vscode.window.showErrorMessage('BeanShell launch configuration is missing "script".');
+                void vscode.window.showErrorMessage('BeanShell launch configuration is missing "script".');
                 return undefined;
             }
             if (!config.agentJar) {
-                vscode.window.showErrorMessage(
+                void vscode.window.showErrorMessage(
                     'BeanShell launch configuration is missing "agentJar" (the bsh-debug-agent jar ' +
                     'built by ./gradlew :agent:instrument:shadowJar).'
                 );
                 return undefined;
             }
             if (!config.classpath) {
-                vscode.window.showErrorMessage(
+                void vscode.window.showErrorMessage(
                     'BeanShell launch configuration is missing "classpath" (it must include the ' +
                     'BeanShell jar).'
                 );
@@ -48,7 +48,7 @@ export class BshConfigurationProvider implements vscode.DebugConfigurationProvid
             config.sources = config.sources || path.basename(config.script);
         } else if (config.request === 'attach') {
             if (!config.port) {
-                vscode.window.showErrorMessage('BeanShell attach configuration is missing "port".');
+                void vscode.window.showErrorMessage('BeanShell attach configuration is missing "port".');
                 return undefined;
             }
             config.host = config.host || '127.0.0.1';

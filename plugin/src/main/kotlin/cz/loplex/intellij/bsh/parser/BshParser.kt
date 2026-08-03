@@ -19,6 +19,7 @@ import cz.loplex.intellij.bsh.psi.BshTokenTypes as T
  * ordered-choice semantics of the original grammar while remaining tolerant of
  * incomplete input in the editor.
  */
+@Suppress("SameReturnValue")
 class BshParser : PsiParser {
 
     private lateinit var b: PsiBuilder
@@ -46,6 +47,7 @@ class BshParser : PsiParser {
     /** Matches by token text; works for keywords, operators and separators. */
     private fun atText(text: String): Boolean = b.tokenText == text
 
+    @Suppress("SameParameterValue")
     private fun lookAhead(n: Int): IElementType? = b.lookAhead(n)
 
     private fun consume() = b.advanceLexer()

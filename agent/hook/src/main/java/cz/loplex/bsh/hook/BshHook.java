@@ -396,6 +396,7 @@ public final class BshHook {
     }
 
     /** A port property, or [fallback] when unset or unparseable. */
+    @SuppressWarnings("SameParameterValue")
     private static int parsedPort(String property, int fallback) {
         String value = System.getProperty(property);
         if (value == null || value.trim().isEmpty()) {

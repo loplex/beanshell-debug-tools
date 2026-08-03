@@ -109,13 +109,6 @@ object BshDebugAgentJar {
     const val PATH_PROPERTY: String = "bsh.debug.agent.jar"
 
     /**
-     * Restricts the agent to the named sources, by file-name suffix (`cz.loplex.bsh.hook.BshHook`'s
-     * `bsh.debug.sources`). Repeated here as a literal because the agent ships as a plugin
-     * *resource*, not a dependency — its classes are deliberately not on the IDE's classpath.
-     */
-    const val SOURCES_PROPERTY: String = "bsh.debug.sources"
-
-    /**
      * Restricts the agent to sources whose name starts with one of the prefixes in the named file
      * (`bsh.debug.sources.file`). What an inline script needs: handed a string, BeanShell names the
      * source after the script's own text, so there is no file-name suffix to match on.

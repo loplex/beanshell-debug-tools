@@ -14,6 +14,13 @@ plugins {
 group = "cz.loplex.bsh"
 description = "Bootstrap-loaded hook invoked by the instrumented BeanShell interpreter"
 
+// See agent/instrument/build.gradle.kts for why sourceCompatibility is declared here too,
+// alongside `release`: IntelliJ's Gradle sync doesn't evaluate `configureEach {}` blocks.
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
 tasks.withType<JavaCompile>().configureEach {
     options.release.set(8)
     options.encoding = "UTF-8"

@@ -44,12 +44,6 @@ object BshJavaResolver {
         return null
     }
 
-    /** Resolves a method or field named [memberName] on the Java class [typeName]. */
-    fun resolveMember(context: PsiElement, typeName: String, memberName: String): PsiElement? {
-        val psiClass = resolveClass(context, typeName) as? PsiClass ?: return null
-        return member(psiClass, memberName)
-    }
-
     fun resolveClassPsi(context: PsiElement, name: String): PsiClass? =
         resolveClass(context, name) as? PsiClass
 

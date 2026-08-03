@@ -443,7 +443,6 @@ final class DapChannel implements DebugChannel {
     private volatile int pendingStepThread;
 
     /** Run modes as the hook understands them; DAP's step requests are mapped onto these. */
-    static final int MODE_RUN = 0;
     static final int MODE_OVER = 1;
     static final int MODE_INTO = 2;
     static final int MODE_OUT = 3;

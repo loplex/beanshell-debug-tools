@@ -1,15 +1,12 @@
 package cz.loplex.bsh.hook;
 
-import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -35,9 +32,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * reflection throughout. Configuration arrives through system properties for the same reason.
  *
  * <p>The wire format is protocol 3, specified in {@code docs/PROTOCOL.md}. Per reported statement
- * the hook writes {@link #EVT_STOPPED} with the call stack and then blocks <b>that thread</b>,
- * answering whatever the IDE asks about its suspended frames — scopes, variables, an expression to
- * evaluate, a value to change — until it is resumed. Other script threads keep running and may
+ * the hook writes via {@link DebugChannel#sendStopped} with the call stack and then blocks
+ * <b>that thread</b>, answering whatever the IDE asks about its suspended frames — scopes,
+ * variables, an expression to evaluate, a value to change — until it is resumed. Other script
+ * threads keep running and may
  * report alongside; see {@link ThreadState} and {@link #readerLoop} for how that works, and
  * {@link #report} for why only the reporting thread suspends. Failure handling is described on
  * {@link #onEval}.
@@ -172,54 +170,6 @@ public final class BshHook {
     private static final String SWITCH_STATEMENT = "BSHSwitchStatement";
     private static final String BLOCK = "BSHBlock";
 
-    /*
-     * Commands the IDE may send on the return channel. RESUME releases a reported statement; any
-     * number of the others may precede it.
-     *
-     * Until the IDE sends SET_BREAKPOINTS at least once every statement is reported, because an IDE
-     * that configures nothing must not go blind. Once it does, the agent falls silent while running
-     * and speaks up only at a breakpoint, which removes the round-trip per statement that made a
-     * plain loop crawl.
-     */
-    private static final int CMD_RESUME = 0x01;
-    private static final int CMD_SET_BREAKPOINTS = 0x02;
-    private static final int CMD_SET_RUN_MODE = 0x03;
-
-    /**
-     * Turns "report everything, on every thread" on and off, so the IDE can round up the other
-     * threads when a breakpoint says Suspend: All. Global rather than per thread — that is what it
-     * means. See {@link #catchAll}.
-     */
-    private static final int CMD_SET_CATCH_ALL = 0x08;
-
-    /**
-     * Requests the IDE may issue while a statement is suspended, each answered with the matching
-     * {@code EVT_*} reply before the loop goes back to waiting.
-     *
-     * <p>They are served on the interpreter thread, from inside the same command loop that waits
-     * for {@link #CMD_RESUME}. That is not a shortcut: the thread is parked there anyway, it is
-     * the thread that owns the BeanShell state being inspected, and answering anywhere else would
-     * need a lock BeanShell does not offer.
-     */
-    private static final int CMD_SCOPES = 0x04;
-    private static final int CMD_VARIABLES = 0x05;
-    private static final int CMD_EVALUATE = 0x06;
-    private static final int CMD_SET_VARIABLE = 0x07;
-
-    /*
-     * The agent-to-IDE direction is opcode-tagged as of protocol 2. It used to be a bare stream of
-     * statement reports, which left no room for a reply to travel back the other way.
-     *
-     * There is no negotiation and no fallback to the old shape, because there is nothing to
-     * negotiate with: the agent jar ships inside the plugin, so both ends are always the same
-     * build. The tools in plugin/tools speak this format too.
-     */
-    private static final int EVT_STOPPED = 0x10;
-    private static final int EVT_SCOPES = 0x11;
-    private static final int EVT_VARIABLES = 0x12;
-    private static final int EVT_EVALUATED = 0x13;
-    private static final int EVT_VARIABLE_SET = 0x14;
-
     /**
      * Handle 0 is never issued, so the IDE can use it to mean "this value has no children" without
      * a separate flag on every variable.
@@ -351,8 +301,6 @@ public final class BshHook {
      * runs the script unfiltered, which is the same outcome as an IDE that never sends breakpoints.
      */
     private static final long CONFIGURATION_TIMEOUT_MS = 30_000L;
-
-    private static final Object WRITE_LOCK = new Object();
 
     /** Guards {@link #connect} and the reader-thread start, which must happen exactly once. */
     private static final Object CONNECT_LOCK = new Object();
@@ -1089,7 +1037,8 @@ public final class BshHook {
     }
 
     /**
-     * Answers {@link #CMD_SCOPES}: the scopes of one frame, each a handle the IDE can expand.
+     * Answers {@link DebugChannel.Command.Kind#SCOPES}: the scopes of one frame, each a handle the
+     * IDE can expand.
      *
      * <p>Two scopes, and the second is the point of having the level at all: <b>Global</b> is the
      * interpreter's own namespace, which is where a script's top-level state lives once execution has
@@ -1185,7 +1134,7 @@ public final class BshHook {
     }
 
     /**
-     * Answers {@link #CMD_EVALUATE}: runs an expression in one frame's scope.
+     * Answers {@link DebugChannel.Command.Kind#EVALUATE}: runs an expression in one frame's scope.
      *
      * <p>The interpreter does the evaluating, so a watch expression sees exactly what the script
      * sees at that point — its variables, its methods, its imports — rather than a reimplementation
@@ -1215,7 +1164,8 @@ public final class BshHook {
     }
 
     /**
-     * Answers {@link #CMD_SET_VARIABLE}: evaluates an expression and stores it into {@code handle}.
+     * Answers {@link DebugChannel.Command.Kind#SET_VARIABLE}: evaluates an expression and stores it
+     * into {@code handle}.
      *
      * <p>A variable in scope is assigned by evaluating the assignment itself, so BeanShell applies
      * its own rules rather than this code guessing at them: a typed variable refuses an

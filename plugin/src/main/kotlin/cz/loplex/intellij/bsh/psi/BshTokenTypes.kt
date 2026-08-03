@@ -1,6 +1,5 @@
 package cz.loplex.intellij.bsh.psi
 
-import com.intellij.psi.tree.IElementType
 import com.intellij.psi.tree.TokenSet
 
 /**
@@ -57,12 +56,6 @@ object BshTokenTypes {
 
     @JvmField
     val STRING_LITERALS: TokenSet = TokenSet.create(STRING_LITERAL, CHARACTER_LITERAL)
-
-    @JvmField
-    val NUMBERS: TokenSet = TokenSet.create(INTEGER_LITERAL, FLOAT_LITERAL)
-
-    @JvmField
-    val BRACES: TokenSet = TokenSet.create(LBRACE, RBRACE)
 
     @JvmField
     val WHITESPACES: TokenSet = TokenSet.create(com.intellij.psi.TokenType.WHITE_SPACE)

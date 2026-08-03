@@ -161,12 +161,6 @@ final class Json {
         return value instanceof String ? (String) value : fallback;
     }
 
-    /** A member as a boolean, or [fallback] when absent or not a boolean. */
-    static boolean getBoolean(Object object, String key, boolean fallback) {
-        Object value = get(object, key);
-        return value instanceof Boolean ? (Boolean) value : fallback;
-    }
-
     /** A member as a list, or an empty list when absent or not an array. */
     @SuppressWarnings("unchecked")
     static List<Object> getList(Object object, String key) {

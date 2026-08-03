@@ -171,7 +171,7 @@ def main():
     conn.request("configurationDone")
     print("[dap] configurationDone", flush=True)
 
-    for index in range(args.stops):
+    for _ in range(args.stops):
         stopped = conn.wait_event("stopped", timeout=30)
         if stopped is None:
             print("[dap] no further stops", flush=True)

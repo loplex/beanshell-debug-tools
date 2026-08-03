@@ -7,10 +7,11 @@
 # diagnosis.
 
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 
+files=( [0-9][0-9]-*.sh )
 failed=()
-for check in [0-9][0-9]-*.sh; do
+for check in "${files[@]}"; do
     if ! bash "$check"; then
         failed+=("$check")
     fi

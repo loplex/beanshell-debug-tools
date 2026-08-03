@@ -170,8 +170,8 @@ def main():
 
     def report(title, numbers):
         print(f"{title}: {len(numbers)}")
-        for number in numbers:
-            print(f"  line {number:<4} {source[number - 1].strip()[:70]}")
+        for n in numbers:
+            print(f"  line {n:<4} {source[n - 1].strip()[:70]}")
 
     print(f"{sample}: {len(wanted)} marked lines, target={target}")
     if missing:

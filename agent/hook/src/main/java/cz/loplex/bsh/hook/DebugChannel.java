@@ -9,7 +9,7 @@ import java.util.List;
  * <p>This interface is where the two transports part company, and the split is deliberately placed so
  * that <b>nothing interesting lives on the transport side</b>. Deciding what counts as a statement,
  * walking the call stack, rendering values, handing out handles, evaluating in a frame's namespace —
- * all of that produces {@link Answer}s and is written once. Only the last step, turning an answer into
+ * all of that produces answers and is written once. Only the last step, turning an answer into
  * bytes, exists twice: {@link NativeChannel} as the compact binary protocol IntelliJ speaks, and
  * {@link DapChannel} as JSON over Content-Length framing for anything else.
  *

@@ -268,18 +268,6 @@ public final class BshHook {
     private static final ThreadLocal<Boolean> REPORTING = new ThreadLocal<>();
 
     /**
-     * Serialises writes to the socket, and nothing else.
-     *
-     * <p>This is the whole of what used to be {@code LOCK}. Before threads, one lock covered
-     * connecting, writing, and being suspended — which is precisely why two threads could not be
-     * suspended at once: the first held it for the duration of its stop. Now a stop holds no lock at
-     * all; it parks on its own mailbox, and this guards only the moments when bytes are being put on
-     * the wire, so a second thread can report while the first is still suspended.
-     *
-     * <p>A message must be written under a single acquisition, or two threads' fields would
-     * interleave into an unparseable stream.
-     */
-    /**
      * Whether every thread should report its next statement, whatever the breakpoints say.
      *
      * <p>How Suspend: All is honoured without pretending to be JDWP. A thread cannot be frozen from
@@ -302,7 +290,7 @@ public final class BshHook {
      */
     private static final long CONFIGURATION_TIMEOUT_MS = 30_000L;
 
-    /** Guards {@link #connect} and the reader-thread start, which must happen exactly once. */
+    /** Guards {@link DebugChannel#connect} and the reader-thread start, which must happen exactly once. */
     private static final Object CONNECT_LOCK = new Object();
 
     private static final int port;
@@ -342,14 +330,6 @@ public final class BshHook {
     private static Method primitiveGetType;
     private static boolean reflectionFailed;
 
-    /**
-     * Objects the IDE may ask to expand, valid only for the current stop.
-     *
-     * <p>Discarded on every resume, which is the whole reason handles are safe: the IDE can never
-     * hold a reference into a script that has moved on, so there is no stale-object problem to
-     * solve and no cleanup protocol to get wrong. This mirrors DAP, where a
-     * {@code variablesReference} is explicitly invalid once execution continues.
-     */
     static {
         int parsed = -1;
         String portProperty = System.getProperty(PORT_PROPERTY);

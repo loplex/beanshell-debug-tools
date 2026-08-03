@@ -3,7 +3,7 @@
 Wires the [debug agent](../../agent/README.md)'s
 [DAP transport](../../docs/PROTOCOL.md#9-relationship-to-dap) into
 [nvim-dap](https://github.com/mfussenegger/nvim-dap). Same agent, same protocol as
-[`../vscode/`](../vscode/) — this is packaging for a different editor, not a second
+[`../vscode/`](../vscode/README.md) — this is packaging for a different editor, not a second
 implementation.
 
 ## Setup

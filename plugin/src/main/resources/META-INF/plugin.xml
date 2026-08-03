@@ -193,8 +193,9 @@
         <localInspection
             language="BeanShell"
             shortName="BshUnresolvedMethod"
-            displayName="Unresolved method call"
-            groupName="BeanShell"
+            key="inspection.unresolvedMethod.name"
+            bundle="messages.BshBundle"
+            groupKey="inspection.group.name"
             enabledByDefault="false"
             level="WARNING"
             implementationClass="cz.loplex.intellij.bsh.inspection.BshUnresolvedMethodInspection"/>
@@ -214,7 +215,8 @@
         <intentionAction>
             <language>BeanShell</language>
             <className>cz.loplex.intellij.bsh.intention.BshIntroduceVariableIntention</className>
-            <category>BeanShell</category>
+            <categoryKey>intention.category.beanshell</categoryKey>
+            <bundleName>messages.BshBundle</bundleName>
         </intentionAction>
 
         <programRunner implementation="cz.loplex.intellij.bsh.debug.BshDebugRunner"/>
@@ -224,8 +226,9 @@
         <localInspection
             language="BeanShell"
             shortName="BshUnusedVariable"
-            displayName="Unused variable"
-            groupName="BeanShell"
+            key="inspection.unusedVariable.name"
+            bundle="messages.BshBundle"
+            groupKey="inspection.group.name"
             enabledByDefault="true"
             level="WARNING"
             implementationClass="cz.loplex.intellij.bsh.inspection.BshUnusedVariableInspection"/>
@@ -233,8 +236,9 @@
         <localInspection
             language="BeanShell"
             shortName="BshUnreachableCode"
-            displayName="Unreachable code"
-            groupName="BeanShell"
+            key="inspection.unreachableCode.name"
+            bundle="messages.BshBundle"
+            groupKey="inspection.group.name"
             enabledByDefault="true"
             level="WARNING"
             implementationClass="cz.loplex.intellij.bsh.inspection.BshUnreachableCodeInspection"/>

@@ -16,11 +16,9 @@
 
     <!-- "Create BeanShell-Enhanced Run Configuration" next to Maven's own, in the tool-window
          goal/phase context menu (Maven.BuildMenu). -->
-    <actions>
+    <actions resource-bundle="messages.BshBundle">
         <action id="Bsh.CreateMavenRunConfiguration"
-                class="cz.loplex.intellij.bsh.debug.maven.BshMavenCreateRunConfigurationAction"
-                text="Create BeanShell-Enhanced Run Configuration"
-                description="Create a Maven run configuration that also debugs inline BeanShell scripts">
+                class="cz.loplex.intellij.bsh.debug.maven.BshMavenCreateRunConfigurationAction">
             <add-to-group group-id="Maven.BuildMenu" anchor="after" relative-to-action="Maven.CreateRunConfiguration"/>
         </action>
     </actions>

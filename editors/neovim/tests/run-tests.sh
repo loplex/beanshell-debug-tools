@@ -7,7 +7,7 @@
 # Usage: ./editors/neovim/tests/run-tests.sh
 
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 TESTS_DIR="$(pwd)"
 REPO_ROOT="$(cd ../../.. && pwd)"
 GRADLEW="$REPO_ROOT/gradlew"

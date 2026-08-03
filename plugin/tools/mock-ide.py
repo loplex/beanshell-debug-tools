@@ -163,10 +163,10 @@ class Session:
                         "thread_name": rutf(self.f),
                         "line": rint(self.f),
                         "depth": rint(self.f),
+                        "frames": [
+                            (rutf(self.f), rutf(self.f), rint(self.f)) for _ in range(rint(self.f))
+                        ],
                     }
-                    stop["frames"] = [
-                        (rutf(self.f), rutf(self.f), rint(self.f)) for _ in range(rint(self.f))
-                    ]
                     self.stops.put(stop)
                 elif event in REPLY_EVENTS:
                     request_id = rint(self.f)
@@ -200,7 +200,7 @@ class Session:
                 (rutf(self.f), rutf(self.f), rutf(self.f), rint(self.f)) for _ in range(rint(self.f))
             ]
         # evaluate / set-variable share one shape: ok, then value/type/handle.
-        return (rbyte(self.f) != 0, rutf(self.f), rutf(self.f), rint(self.f))
+        return rbyte(self.f) != 0, rutf(self.f), rutf(self.f), rint(self.f)
 
     def send(self, payload):
         with self._lock:
@@ -219,6 +219,7 @@ class Session:
             raise EOFError
         got, payload = answer
         if got != event:
+            # noinspection PyStringFormat
             sys.exit(f"[mock-ide] expected 0x{event:02x} for request {request_id}, got 0x{got:02x}")
         return payload
 
@@ -359,6 +360,7 @@ def main():
                 print("[mock-ide] catch-all off", flush=True)
             for thread in held:
                 print(f"[mock-ide] releasing held thread={thread}", flush=True)
+                # noinspection PyTypeChecker
                 resume(s, thread)
             held = []
             continue
@@ -421,10 +423,12 @@ def main():
                 print("[mock-ide] catch-all off", flush=True)
             for thread in held:
                 print(f"[mock-ide] releasing held thread={thread}", flush=True)
+                # noinspection PyTypeChecker
                 resume(s, thread)
             held = []
             continue
 
+        # noinspection PyTypeChecker
         resume(s, stop["thread"])
 
     if s.error:

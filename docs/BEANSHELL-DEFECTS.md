@@ -40,7 +40,7 @@ at runtime and package-private access fails.
 
 Even an empty `finally`. The root cause is one line, `BSHTryStatement.java:173`:
 
-```java
+```jshelllanguage
 if (finallyBlock != null)
     ret = finallyBlock.eval(callstack, interpreter);
 ```
@@ -49,6 +49,7 @@ It overwrites `ret` unconditionally, discarding the `ReturnControl` produced by 
 try/catch block. Minimal repro:
 
 ```java
+@SuppressWarnings("EmptyFinallyBlock")
 f() { try { return "ok"; } finally { } } f();   // yields void
 ```
 

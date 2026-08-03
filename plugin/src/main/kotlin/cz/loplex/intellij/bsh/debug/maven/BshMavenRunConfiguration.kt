@@ -116,7 +116,7 @@ class BshMavenRunConfiguration(
 
             val server = ServerSocket(0)
             try {
-                // Materialise a private runner settings on the clone before injecting our properties.
+                // Materialize a private runner settings on the clone before injecting our properties.
                 val settings = (runnerSettings ?: MavenRunner.getInstance(project).settings).clone()
                 runnerSettings = settings
                 val props = LinkedHashMap(settings.mavenProperties)

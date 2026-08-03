@@ -73,11 +73,11 @@ Everything is registered in [`META-INF/plugin.xml`](../src/main/resources/META-I
 Optional integrations are isolated in separate descriptors loaded via optional
 `<depends>`:
 
-| Descriptor | Loaded when | Provides |
-|------------|-------------|----------|
-| `bsh-java.xml` | Java plugin present | Java navigation / debug attach |
-| `bsh-xml.xml` | XML module present | Maven/XML language injection |
-| `bsh-spellchecker.xml` | Spellchecker present | comment/string spell-checking |
+| Descriptor             | Loaded when          | Provides                       |
+|------------------------|----------------------|--------------------------------|
+| `bsh-java.xml`         | Java plugin present  | Java navigation / debug attach |
+| `bsh-xml.xml`          | XML module present   | Maven/XML language injection   |
+| `bsh-spellchecker.xml` | Spellchecker present | comment/string spell-checking  |
 
 Packages by concern: `highlight`, `editor` (folding, brace matcher, commenter,
 surround), `formatting`, `structure`, `navigation`, `completion`, `inspection`,

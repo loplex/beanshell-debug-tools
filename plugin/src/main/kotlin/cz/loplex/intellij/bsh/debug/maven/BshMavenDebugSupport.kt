@@ -39,7 +39,7 @@ object BshMavenDebugSupport {
     private const val NAME_LEAD = "inline evaluation of: ``"
 
     /**
-     * How much of the script goes into the prefix used to recognise it.
+     * How much of the script goes into the prefix used to recognize it.
      *
      * Below BeanShell's own 80-character cut so the elision can never fall inside the prefix, and
      * well above the length at which two `<script>` blocks in one pom would still look alike.
@@ -106,7 +106,7 @@ object BshMavenDebugSupport {
      * line up in that snippet's map.
      *
      * The longest matching prefix wins, so two snippets sharing an opening line still resolve to the
-     * right one. An unrecognised name — BeanShell's own commands, a script the pom does not contain —
+     * right one. An unrecognized name — BeanShell's own commands, a script the pom does not contain —
      * maps to -1, which is how the session says "not in this file".
      */
     fun lineMapper(prepared: List<Prepared>): (String, Int) -> Int {

@@ -16,15 +16,15 @@ There are two runtime mechanisms and one verification oracle. The mechanism is a
 per-configuration setting — *Debug instrumentation* in the BeanShell run
 configuration — defaulting to `AGENT`.
 
-| Implementation | Role |
-|---|---|
-| `agent/` (JVM agent) | **Default.** Instruments the interpreter; the script is untouched |
-| `debug/BshDebugInstrumenter.kt` (PSI) | Fallback. Needs only a source file — no agent, no JVM flag |
-| `tools/bshInstrumenter.main.kts` | **Not a runtime option.** A verification oracle |
+| Implementation                        | Role                                                              |
+|---------------------------------------|-------------------------------------------------------------------|
+| `agent/` (JVM agent)                  | **Default.** Instruments the interpreter; the script is untouched |
+| `debug/BshDebugInstrumenter.kt` (PSI) | Fallback. Needs only a source file — no agent, no JVM flag        |
+| `tools/bshInstrumenter.main.kts`      | **Not a runtime option.** A verification oracle                   |
 
 The setting is stored by enum **name** rather than ordinal, so reordering
 `BshInstrumentationMode` cannot silently repoint saved configurations at the other
-mechanism, and an unrecognised value falls back to the default rather than refusing
+mechanism, and an unrecognized value falls back to the default rather than refusing
 to launch. Choosing `AGENT` with no agent jar available also falls back to rewriting:
 the user asked to debug, and a degraded session beats none.
 
@@ -117,12 +117,12 @@ variables.
 The reported BeanShell call depth is monotonic per nested call. Step actions
 compare against the depth captured when the step began:
 
-| Action | Pauses when |
-|--------|-------------|
-| Step Into | next statement, any depth |
+| Action    | Pauses when                                              |
+|-----------|----------------------------------------------------------|
+| Step Into | next statement, any depth                                |
 | Step Over | depth ≤ the step-point depth (skips descents into calls) |
-| Step Out | depth < the step-point depth (only after returning) |
-| Resume | only at a breakpoint |
+| Step Out  | depth < the step-point depth (only after returning)      |
+| Resume    | only at a breakpoint                                     |
 
 ## Java breakpoints (dual session) — `debug/BshDebugRunner.kt`
 
@@ -155,7 +155,7 @@ then for a value's children when the user expands it. `BshStackFrame` and
 `BshDebugProcess` implements `BshValueSource` to make it.
 
 Nested objects, collections, maps and arrays therefore expand in the Variables
-panel, and a value nobody looks at is never serialised.
+panel, and a value nobody looks at is never serialized.
 
 **The two mechanisms differ here**, and the protocol lets them say so. The agent is
 handed the whole `CallStack`, so it reports every frame. The rewriting fallback is
@@ -224,7 +224,7 @@ It prints the stack at each stop and, with `--expand`, opens every expandable va
 level — which is how the scopes and the `This`-as-namespace expansion above were checked.
 `--eval` and `--set` exercise the other two requests.
 
-**Is behaviour unchanged?** `runHost` and `runHostWithAgent` must agree:
+**Is behavior unchanged?** `runHost` and `runHostWithAgent` must agree:
 
 ```bash
 ./gradlew :agent:samples:runHost > plain.txt
@@ -238,7 +238,7 @@ through to the JVM the plugin realm lives in. Debugging an inline `<script>` giv
 values, which is the giveaway: only the instrumenting agent hands out child handles, so a
 rewritten session would show a flat list and no Evaluate.
 
-That is also the diagnostic if it ever regresses. Flat variables and a greyed-out Evaluate mean
+That is also the diagnostic if it ever regresses. Flat variables and a grayed-out Evaluate mean
 the agent did not load, and the console (under `AGENT_OR_REWRITE`) or the launch error (under
 `AGENT`) says why.
 

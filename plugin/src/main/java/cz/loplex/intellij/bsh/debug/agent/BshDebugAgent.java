@@ -66,7 +66,7 @@ public final class BshDebugAgent {
      *
      * <p>A {@code WeakHashMap} so a finished script thread does not keep its {@code Thread} object
      * alive. Losing an entry costs nothing: a thread that never reports again never needs its id, and
-     * one that does gets a fresh id, which the IDE treats as a new thread.
+     * one that reports again gets a fresh id, which the IDE treats as a new thread.
      */
     private static final Map<Thread, Integer> threadIds = new WeakHashMap<>();
 
@@ -194,7 +194,7 @@ public final class BshDebugAgent {
      * <p>Running an expression needs a {@code bsh.Interpreter}, and a rewritten script hands the hook
      * a {@code bsh.NameSpace} — which cannot evaluate anything. The IDE is told as much up front and
      * offers neither Watches nor Set Value here, so this reply is the belt to that braces: an
-     * unrecognised opcode is treated as a resume, and silently continuing a script because the IDE
+     * unrecognized opcode is treated as a resume, and silently continuing a script because the IDE
      * asked a question this path cannot answer would be much worse than an error message.
      */
     private static final String NOT_SUPPORTED =
@@ -217,14 +217,14 @@ public final class BshDebugAgent {
             if (command == CMD_SET_CATCH_ALL) {
                 // Suspend: All rounds up the *other* threads, which this path has no way to reach --
                 // it holds one lock for the whole of a stop, so they are already waiting in step().
-                // The byte still has to be consumed or the stream desynchronises for good.
+                // The byte still has to be consumed or the stream desynchronizes for good.
                 in.readByte();
                 continue;
             }
             if (command == CMD_SET_BREAKPOINTS) {
                 // Carries no thread id. Read and discarded: this path never filters, so it keeps
                 // reporting every statement -- but the bytes have to be consumed or the stream
-                // desynchronises for good.
+                // desynchronizes for good.
                 int count = in.readInt();
                 for (int i = 0; i < count; i++) {
                     in.readUTF();
@@ -274,7 +274,7 @@ public final class BshDebugAgent {
             } else if (command == CMD_SET_RUN_MODE) {
                 in.readByte();  // mode; this path never filters, so nothing to apply
             } else {
-                // CMD_RESUME, and anything unrecognised, which must not be able to wedge a script.
+                // CMD_RESUME, and anything unrecognized, which must not be able to wedge a script.
                 return;
             }
         }

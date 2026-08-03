@@ -86,7 +86,7 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
         }
 
         // When Java debugging is available, run the JVM under JDWP so breakpoints in the
-        // Java code called from the script are honoured by a second (Java) debug session.
+        // Java code called from the script are honored by a second (Java) debug session.
         val javaDebug = BshJavaDebugAttach.isAvailable()
         val jdwpPort = if (javaDebug) freePort() else -1
 

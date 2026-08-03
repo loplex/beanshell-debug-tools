@@ -88,8 +88,8 @@ expression `07` and the other two editors' tests already prove work):
    - resuming lets the script run to completion (`script done` on the target JVM's stdout) —
      and, since `DapChannel` never sends a `terminated`/`exited` DAP event, watch what LSP4E
      itself does when the socket merely drops: whether the Debug view marks the session
-     terminated on its own or is left stuck, since that is LSP4E's behaviour to characterize, not
+     terminated on its own or is left stuck, since that is LSP4E's behavior to characterize, not
      this agent's to fix.
 
 A step that stops holding is a regression in the DAP transport itself — cross-check against `07`
-and the VS Code/Neovim tests before assuming it's LSP4E's own behaviour that changed.
+and the VS Code/Neovim tests before assuming it's LSP4E's own behavior that changed.

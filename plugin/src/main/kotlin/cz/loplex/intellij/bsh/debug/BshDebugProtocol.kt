@@ -3,7 +3,7 @@ package cz.loplex.intellij.bsh.debug
 /*
  * The debug wire protocol, version 3. The full specification -- framing, every field, the
  * invariants and the failure modes -- is `docs/PROTOCOL.md`; this file is the IDE end's copy of the
- * opcodes plus the notes that matter when reading the code around them.
+ * opcodes plus the notes that matter when reading the surrounding code.
  *
  * Both ends of it live in this repository -- the instrumenting agent in `agent/`, the rewriting
  * fallback in `debug/agent/BshDebugAgent.java` -- and the agent jar ships inside the plugin, so
@@ -33,7 +33,7 @@ package cz.loplex.intellij.bsh.debug
  *
  * A handle is opaque and valid only until the next resume, which is what makes it safe: the IDE
  * can never hold a reference into a script that has moved on. This is DAP's `variablesReference`
- * in a smaller encoding, so adopting DAP later changes the serialisation and not the design.
+ * in a smaller encoding, so adopting DAP later changes the serialization and not the design.
  *
  * The two failable requests answer with `ok`, and on failure carry the reason in `value` rather
  * than dropping the connection: a mistyped watch expression is ordinary use, not a protocol error.

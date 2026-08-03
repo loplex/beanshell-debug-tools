@@ -36,7 +36,7 @@ final class NativeChannel implements DebugChannel {
 
     private final int port;
 
-    /** Serialises writes. A message must go out under one acquisition or two threads' fields interleave. */
+    /** Serializes writes. A message must go out under one acquisition or two threads' fields interleave. */
     private final Object writeLock = new Object();
 
     private Socket socket;
@@ -134,8 +134,8 @@ final class NativeChannel implements DebugChannel {
      * Reads one command.
      *
      * <p>Every opcode's shape has to be known even for the ones this method does not interpret: there
-     * are no length prefixes, so an opcode it could not decode would desynchronise the stream for
-     * good. An unrecognised one therefore reads its thread id and stops there, which keeps the stream
+     * are no length prefixes, so an opcode it could not decode would desynchronize the stream for
+     * good. An unrecognized one therefore reads its thread id and stops there, which keeps the stream
      * aligned for anything carrying no further fields.
      */
     public Command readCommand() throws IOException {

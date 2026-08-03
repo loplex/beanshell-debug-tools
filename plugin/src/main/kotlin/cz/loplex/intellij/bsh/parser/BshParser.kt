@@ -12,7 +12,7 @@ import cz.loplex.intellij.bsh.psi.BshTokenTypes as T
  *
  * The BeanShell reference grammar (`bsh.jjt`) relies heavily on JavaCC syntactic
  * lookaheads to disambiguate declarations from statements, casts from
- * parenthesised expressions, and so on. Those lookaheads are reproduced here
+ * parenthesized expressions, and so on. Those lookaheads are reproduced here
  * with bounded backtracking: an alternative is attempted behind a
  * [PsiBuilder.Marker], and [PsiBuilder.Marker.rollbackTo] rewinds the builder if
  * it does not match, so the next alternative can be tried. This mirrors the

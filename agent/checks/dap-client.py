@@ -23,7 +23,7 @@ Usage:
                                        [--evaluate 'expr'] [--set name=value] [--json]
 
 Prints one line per protocol step, which is what the checks assert on. `--json` additionally
-dumps every message, for when the disagreement is about the wire rather than the behaviour.
+dumps every message, for when the disagreement is about the wire rather than the behavior.
 """
 import argparse
 import json

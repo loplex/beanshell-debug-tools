@@ -81,7 +81,7 @@ enum class BshInstrumentationMode(
         val DEFAULT: BshInstrumentationMode = AGENT
 
         /**
-         * Reads a stored name, tolerating anything it does not recognise.
+         * Reads a stored name, tolerating anything it does not recognize.
          *
          * Run-configuration options are persisted as text in the project, so this has to survive a
          * value written by a different version of the plugin — or edited by hand. Falling back to
@@ -94,8 +94,8 @@ enum class BshInstrumentationMode(
 /**
  * Locates the instrumenting agent jar.
  *
- * The jar is shipped as a plugin resource (see the `agentJar` configuration in
- * `build.gradle.kts`) and extracted to a temp file on first use, so it can be passed to a forked
+ * The jar is shipped as a plugin resource (see the `agentJar` configuration in `build.gradle.kts`)
+ * and extracted to a temp file on first use, so it can be passed to a forked
  * JVM as `-javaagent:`. Same mechanism as [BshMavenExt], and for the same reason: the jar has to
  * exist as a file on disk, but its classes must not join the IDE's own classpath.
  *

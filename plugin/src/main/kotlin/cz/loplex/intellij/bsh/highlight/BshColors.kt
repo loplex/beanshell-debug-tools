@@ -6,7 +6,7 @@ import com.intellij.openapi.editor.colors.TextAttributesKey
 
 /**
  * Text attribute keys used by the BeanShell highlighter, derived from the
- * platform defaults so they follow the active colour scheme.
+ * platform defaults so they follow the active color scheme.
  */
 object BshColors {
     val KEYWORD: TextAttributesKey =

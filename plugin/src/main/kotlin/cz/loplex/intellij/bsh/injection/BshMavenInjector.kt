@@ -65,7 +65,7 @@ class BshMavenInjector : MultiHostInjector {
         while (sibling != null) {
             when (sibling) {
                 is PsiWhiteSpace -> {}
-                is XmlText -> if (!sibling.text.isBlank()) return false
+                is XmlText -> if (sibling.text.isNotBlank()) return false
                 is XmlComment -> return LANGUAGE_COMMENT.containsMatchIn(sibling.text)
                 else -> return false
             }

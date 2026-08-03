@@ -22,7 +22,7 @@ class BshUnusedVariableInspection : LocalInspectionTool() {
         object : PsiElementVisitor() {
             override fun visitElement(element: PsiElement) {
                 if (element !is BshVariableDeclarator && element !is BshFormalParameter) return
-                val named = element as BshNamedElement
+                val named: BshNamedElement = element
                 val identifier = named.nameIdentifier ?: return
                 val file = element.containingFile ?: return
 

@@ -101,7 +101,7 @@ class BshDebugRunner : GenericProgramRunner<RunnerSettings>() {
             )
         }
         if (useAgent) {
-            commandLine.withParameters("-javaagent:${agentJar!!.absolutePath}")
+            commandLine.withParameters("-javaagent:${agentJar.absolutePath}")
             // Instrumenting the interpreter reaches strictly more code than rewriting one script
             // does, so without this the session would also stop inside BeanShell's own commands --
             // print and friends are .bsh files on the classpath.

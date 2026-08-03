@@ -13,7 +13,7 @@ import cz.loplex.intellij.bsh.psi.BshNamedElement
 class BshReadWriteAccessDetector : ReadWriteAccessDetector() {
 
     override fun isReadWriteAccessible(element: PsiElement): Boolean =
-        element is BshNamedElement || element is BshAmbiguousName
+        element is BshNamedElement
 
     override fun isDeclarationWriteAccess(element: PsiElement): Boolean =
         element is BshAmbiguousName && BshScopes.isSimpleAssignmentTarget(element)

@@ -1,5 +1,14 @@
 package cz.loplex.intellij.bsh
 
+import com.intellij.codeInsight.hints.declarative.CollapseState
+import com.intellij.codeInsight.hints.declarative.CollapsiblePresentationTreeBuilder
+import com.intellij.codeInsight.hints.declarative.HintFormat
+import com.intellij.codeInsight.hints.declarative.InlayActionData
+import com.intellij.codeInsight.hints.declarative.InlayPayload
+import com.intellij.codeInsight.hints.declarative.InlayPosition
+import com.intellij.codeInsight.hints.declarative.InlayTreeSink
+import com.intellij.codeInsight.hints.declarative.PresentationTreeBuilder
+import com.intellij.codeInsight.hints.declarative.SharedBypassCollector
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import cz.loplex.intellij.bsh.completion.BshInlayParameterHintsProvider
@@ -96,8 +105,45 @@ class BshFeaturesTest : BasePlatformTestCase() {
         val invocation = PsiTreeUtil.collectElements(file) {
             it.node.elementType === BshElementTypes.METHOD_INVOCATION
         }.first()
-        val hints = BshInlayParameterHintsProvider().getParameterHints(invocation)
-        assertEquals(listOf("a", "b"), hints.map { it.text })
+
+        val texts = mutableListOf<String>()
+        val sink = object : InlayTreeSink {
+            override fun addPresentation(
+                position: InlayPosition,
+                payloads: List<InlayPayload>?,
+                tooltip: String?,
+                hintFormat: HintFormat,
+                builder: PresentationTreeBuilder.() -> Unit,
+            ) {
+                val recordingBuilder = object : PresentationTreeBuilder {
+                    override fun list(builder: PresentationTreeBuilder.() -> Unit) {}
+                    override fun collapsibleList(
+                        state: CollapseState,
+                        expandedState: CollapsiblePresentationTreeBuilder.() -> Unit,
+                        collapsedState: CollapsiblePresentationTreeBuilder.() -> Unit,
+                    ) {
+                    }
+
+                    override fun text(text: String, actionData: InlayActionData?) {
+                        texts += text
+                    }
+
+                    override fun clickHandlerScope(
+                        actionData: InlayActionData,
+                        builder: PresentationTreeBuilder.() -> Unit,
+                    ) {
+                    }
+                }
+                recordingBuilder.builder()
+            }
+
+            override fun whenOptionEnabled(optionId: String, block: () -> Unit) {}
+        }
+
+        val collector = BshInlayParameterHintsProvider().createCollector(file, myFixture.editor) as SharedBypassCollector
+        collector.collectFromElement(invocation, sink)
+
+        assertEquals(listOf("a:", "b:"), texts)
     }
 
     fun testBreakpointsAllowedOnlyInBshFiles() {

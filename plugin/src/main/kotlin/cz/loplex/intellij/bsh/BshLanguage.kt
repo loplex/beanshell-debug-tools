@@ -7,7 +7,7 @@ import com.intellij.lang.Language
  *
  * BeanShell is a small, embeddable Java source interpreter with a Java-like
  * syntax plus a number of loosely typed scripting conveniences. The grammar
- * modelled by this plugin follows the BeanShell 3.0 `bsh.jjt` grammar.
+ * modeled by this plugin follows the BeanShell 3.0 `bsh.jjt` grammar.
  */
 object BshLanguage : Language("BeanShell") {
     private fun readResolve(): Any = BshLanguage

@@ -7,7 +7,7 @@
 # keeps the native protocol, which check 03 and 05 cover.
 #
 # What this asserts is that a real DAP conversation works end to end -- the handshake in the right
-# order, breakpoints honoured, a stack with more than one frame, both scopes, and an expression
+# order, breakpoints honored, a stack with more than one frame, both scopes, and an expression
 # evaluated in the stopped frame. Between them those cover every translation the DAP channel makes,
 # and each one has a specific way of going wrong:
 #

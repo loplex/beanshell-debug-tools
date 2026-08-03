@@ -34,11 +34,11 @@ its first report. There is no handshake and no version negotiation — see
 
 Encoding is `java.io.DataOutputStream` / `DataInputStream`, so:
 
-| notation | on the wire |
-|---|---|
-| `byte` | 1 byte |
-| `int` | 4 bytes, **big-endian** (`writeInt`) |
-| `utf` | `writeUTF`: 2-byte unsigned length, then modified UTF-8 |
+| notation | on the wire                                             |
+|----------|---------------------------------------------------------|
+| `byte`   | 1 byte                                                  |
+| `int`    | 4 bytes, **big-endian** (`writeInt`)                    |
+| `utf`    | `writeUTF`: 2-byte unsigned length, then modified UTF-8 |
 
 Messages are **not length-prefixed**. Each is an opcode byte followed by fields whose
 count and types the opcode fixes, so a reader must consume exactly what the opcode
@@ -132,7 +132,7 @@ count times:
 
 At most **1000** children are written for one handle. Lazy expansion removes the cost of
 unopened objects, not of an opened one, and a million-element list would still stall the
-interpreter thread while it serialised.
+interpreter thread while it serialized.
 
 `bsh.Primitive` — the wrapper around every scripted `int`, `boolean` and so on — is
 reported **unwrapped**: `type` is what `Primitive.getType()` says (`int`), and
@@ -180,7 +180,7 @@ count times:
   int line
 ```
 
-An optimisation, not a requirement: until the IDE sends this at least once, the agent
+An optimization, not a requirement: until the IDE sends this at least once, the agent
 reports **every** statement and the IDE decides. Once sent, the agent falls silent while
 running and speaks up only where a breakpoint matches — which is what makes a loop
 usable.
@@ -196,7 +196,7 @@ byte  0x08
 byte  on            1 = every thread reports its next statement, 0 = back to normal filtering
 ```
 
-Global, like `SET_BREAKPOINTS`, and how **Suspend: All** is honoured. The IDE sets it when a
+Global, like `SET_BREAKPOINTS`, and how **Suspend: All** is honored. The IDE sets it when a
 breakpoint whose policy is `ALL` is hit, and clears it on resume.
 
 There is no way to freeze a thread from outside — it only ever stops where it calls the
@@ -324,12 +324,12 @@ The agent is configured by **system properties**, not by the protocol, because t
 is loaded by the bootstrap classloader and system properties are the one channel that is
 loader-independent.
 
-| property | meaning |
-|---|---|
-| `bsh.debug.port` | the IDE's listening port. Absent = not debugging, run untouched |
-| `bsh.debug.sources` | comma-separated file-name suffixes to report on |
-| `bsh.debug.sources.file` | path to a file of source-name **prefixes**, one per line |
-| `bsh.debug.trace` | report to stderr instead of the socket (development aid) |
+| property                 | meaning                                                         |
+|--------------------------|-----------------------------------------------------------------|
+| `bsh.debug.port`         | the IDE's listening port. Absent = not debugging, run untouched |
+| `bsh.debug.sources`      | comma-separated file-name suffixes to report on                 |
+| `bsh.debug.sources.file` | path to a file of source-name **prefixes**, one per line        |
+| `bsh.debug.trace`        | report to stderr instead of the socket (development aid)        |
 
 The two source filters are ORed; neither set means report everything. A filter is not
 optional under the instrumenting agent: it also reaches BeanShell's own commands, which
@@ -339,23 +339,23 @@ no file name — see [`agent/README.md`](../agent/README.md#which-sources-to-rep
 
 ## 8. Failure modes
 
-| situation | agent behaviour |
-|---|---|
-| no `bsh.debug.port` | disables itself; the script runs untouched |
-| port set, nothing listening | `System.exit(69)` (`EX_UNAVAILABLE`) — silently skipping every breakpoint is the failure that looks like "it just ran" |
-| session drops mid-run | warn and detach; the script continues. Aborting what may be a real Maven build would be worse |
-| a request fails (bad expression) | ordinary reply with `ok = 0`; the connection stays up |
-| an unreadable object | send whatever was gathered; not worth failing the session |
-| reflection setup fails | give up reporting, permanently, rather than throwing from inside a transformer |
+| situation                        | agent behavior                                                                                                         |
+|----------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| no `bsh.debug.port`              | disables itself; the script runs untouched                                                                             |
+| port set, nothing listening      | `System.exit(69)` (`EX_UNAVAILABLE`) — silently skipping every breakpoint is the failure that looks like "it just ran" |
+| session drops mid-run            | warn and detach; the script continues. Aborting what may be a real Maven build would be worse                          |
+| a request fails (bad expression) | ordinary reply with `ok = 0`; the connection stays up                                                                  |
+| an unreadable object             | send whatever was gathered; not worth failing the session                                                              |
+| reflection setup fails           | give up reporting, permanently, rather than throwing from inside a transformer                                         |
 
 ## 9. Relationship to DAP
 
 Two transports, chosen at premain by `bsh.debug.protocol`:
 
-| value | transport | direction | who uses it |
-|---|---|---|---|
-| `native` (default) | this document | agent **connects** to the IDE's port (`bsh.debug.port`) | the IntelliJ plugin |
-| `dap` | [Debug Adapter Protocol][dap] | agent **listens** (`bsh.debug.listen`, defaults to `bsh.debug.port`) | VS Code, Neovim, Eclipse, … |
+| value              | transport                     | direction                                                            | who uses it                 |
+|--------------------|-------------------------------|----------------------------------------------------------------------|-----------------------------|
+| `native` (default) | this document                 | agent **connects** to the IDE's port (`bsh.debug.port`)              | the IntelliJ plugin         |
+| `dap`              | [Debug Adapter Protocol][dap] | agent **listens** (`bsh.debug.listen`, defaults to `bsh.debug.port`) | VS Code, Neovim, Eclipse, … |
 
 **Why both, rather than DAP replacing this.** LSP4IJ's DAP client does not implement the
 `thread` event, so routing IntelliJ through DAP would *lose* the thread support the native

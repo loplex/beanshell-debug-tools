@@ -11,12 +11,60 @@ plain terminal.
 
 ## The pieces
 
-| File | Role |
-|------|------|
-| `bshInstrumenter.main.kts` | Reads a `.bsh` script on **stdin**, writes an instrumented copy to **stdout**. Before every safe statement it prepends `cz.loplex.intellij.bsh.debug.agent.BshDebugAgent.step(line, this.namespace);`. |
-| `run-debug-bsh.sh` | Instruments a script (via the above) and runs it through `bsh.Interpreter`, with `BshDebugAgent` on the classpath from `build/`. Given a port, tells the agent to connect there. |
-| `mock-ide.py` | Stands in for the IDE end of the transport. Listens on a port, prints every stop (`line`, `callDepth`, the call stack) with frame 0's variables, and replies "resume" so the script runs to completion. Options exercise the rest of the protocol: `--breakpoints file.bsh:25,…` pushes a breakpoint set, which makes the agent filter locally instead of reporting every statement; `--expand` opens every expandable value one level; `--eval 'x + 1,twice(x)'` evaluates in frame 0; `--set count=99` assigns there. |
-| `check-instrumentation.py` | Checks an implementation against the `HOOK` / `NO-HOOK` / `REWRITE-ONLY` / `AGENT-ONLY` markers in `samples/instrumentation-boundaries.bsh`, so those markers cannot rot. `--target rewriter` (static, checks every marked line) or `--target agent` (dynamic, checks the lines a run actually reaches). |
+<table>
+<thead>
+  <tr>
+    <th>File</th>
+    <th>Role</th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td><code>bshInstrumenter.main.kts</code></td>
+    <td>
+      Reads a <code>.bsh</code> script on <strong>stdin</strong>, writes
+      an instrumented copy to <strong>stdout</strong>. Before every safe
+      statement it prepends
+      <code>cz.loplex.intellij.bsh.debug.agent.BshDebugAgent.step(line, this.namespace);</code>.
+    </td>
+  </tr>
+  <tr>
+    <td><code>run-debug-bsh.sh</code></td>
+    <td>
+      Instruments a script (via the above) and runs it through
+      <code>bsh.Interpreter</code>, with <code>BshDebugAgent</code> on the
+      classpath from <code>build/</code>. Given a port, tells the agent to
+      connect there.
+    </td>
+  </tr>
+  <tr>
+    <td><code>mock-ide.py</code></td>
+    <td>
+      Stands in for the IDE end of the transport. Listens on a port,
+      prints every stop (<code>line</code>, <code>callDepth</code>, the call
+      stack) with frame 0’s variables, and replies “resume” so the script runs
+      to completion. Options exercise the rest of the protocol:
+      <code>--breakpoints file.bsh:25,…</code> pushes a breakpoint set, which
+      makes the agent filter locally instead of reporting every statement;
+      <code>--expand</code> opens every expandable value one level;
+      <code>--eval 'x + 1,twice(x)'</code> evaluates in frame 0;
+      <code>--set count=99</code> assigns there.
+    </td>
+  </tr>
+  <tr>
+    <td><code>check-instrumentation.py</code></td>
+    <td>
+      Checks an implementation against the <code>HOOK</code> /
+      <code>NO-HOOK</code> / <code>REWRITE-ONLY</code> /
+      <code>AGENT-ONLY</code> markers in
+      <code>samples/instrumentation-boundaries.bsh</code>, so those markers
+      cannot rot. <code>--target rewriter</code> (static, checks every marked
+      line) or <code>--target agent</code> (dynamic, checks the lines a run
+      actually reaches).
+    </td>
+  </tr>
+</tbody>
+</table>
 
 ## Running them together
 

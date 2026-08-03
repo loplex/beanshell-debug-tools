@@ -285,7 +285,7 @@ final class DapChannel implements DebugChannel {
             return handleStep(seq, command, args);
         }
         if ("pause".equals(command)) {
-            // Cannot be honoured: a thread is only ever stopped where it calls the hook, so there is
+            // Cannot be honored: a thread is only ever stopped where it calls the hook, so there is
             // nothing to interrupt. Refusing with a reason beats accepting and doing nothing.
             sendResponse(seq, command, false, null,
                     "Pause is not supported: a BeanShell thread can only stop at a statement");

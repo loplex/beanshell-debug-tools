@@ -3,11 +3,11 @@
 One tag drives three independently-gated artifacts, all via
 [`.github/workflows/release.yml`](../.github/workflows/release.yml):
 
-| Artifact | Changelog gate | Built by | Published to |
-|---|---|---|---|
-| IDEA plugin | `plugin/CHANGELOG.md` | `:plugin:buildPlugin` | GitHub Release + JetBrains Marketplace |
-| Debug agent | `agent/CHANGELOG.md` | `:agent:instrument:shadowJar` | GitHub Release only |
-| VS Code extension | `editors/vscode/CHANGELOG.md` | `vsce package` | GitHub Release + VS Code Marketplace |
+| Artifact          | Changelog gate                | Built by                      | Published to                           |
+|-------------------|-------------------------------|-------------------------------|----------------------------------------|
+| IDEA plugin       | `plugin/CHANGELOG.md`         | `:plugin:buildPlugin`         | GitHub Release + JetBrains Marketplace |
+| Debug agent       | `agent/CHANGELOG.md`          | `:agent:instrument:shadowJar` | GitHub Release only                    |
+| VS Code extension | `editors/vscode/CHANGELOG.md` | `vsce package`                | GitHub Release + VS Code Marketplace   |
 
 Pushing `vX.Y.Z` runs all three build jobs, but **each one only builds and publishes
 if its own changelog has a `## [X.Y.Z]` section.** An artifact with nothing new this

@@ -116,7 +116,7 @@ public final class BshHook {
     /**
      * Upper bound on the children of one value. Lazy expansion removes the cost of unopened
      * objects, not the cost of an opened one, and a million-element list would still stall the
-     * interpreter thread while it serialised.
+     * interpreter thread while it serialized.
      */
     private static final int MAX_CHILDREN = 1000;
 
@@ -159,7 +159,7 @@ public final class BshHook {
      * indices.
      *
      * This is per-node-type knowledge, which the transformer deliberately avoids — but here it
-     * degrades gracefully. An unrecognised container simply reports none of its direct children,
+     * degrades gracefully. An unrecognized container simply reports none of its direct children,
      * exactly as before this rule existed, so a future BeanShell that renames or reshapes a node
      * loses brace-less-body coverage instead of misbehaving.
      */
@@ -270,7 +270,7 @@ public final class BshHook {
     /**
      * Whether every thread should report its next statement, whatever the breakpoints say.
      *
-     * <p>How Suspend: All is honoured without pretending to be JDWP. A thread cannot be frozen from
+     * <p>How Suspend: All is honored without pretending to be JDWP. A thread cannot be frozen from
      * outside — it only ever stops where it calls the hook — so "suspend all" is implemented as
      * "everyone reports at the next statement, and the IDE decides who stays stopped". The IDE sets
      * this when a Suspend: All breakpoint is hit and clears it on resume.
@@ -442,7 +442,7 @@ public final class BshHook {
             }
             report(state, line, sourceFile, callstack, interpreter);
         } catch (Throwable t) {
-            // Never let a debugging problem change the behaviour of the debugged script.
+            // Never let a debugging problem change the behavior of the debugged script.
             disabled = true;
             System.err.println("[bsh-agent] disabling instrumentation after an internal error: " + t);
             close();
@@ -668,7 +668,7 @@ public final class BshHook {
     /**
      * Applies one command on the thread that owns the state, and answers it if it expects an answer.
      *
-     * <p>Returns true when the thread should stop waiting. An unrecognised command counts as a
+     * <p>Returns true when the thread should stop waiting. An unrecognized command counts as a
      * release: the worst case is a script that keeps running, whereas ignoring it could leave a thread
      * parked for good.
      */
@@ -744,7 +744,7 @@ public final class BshHook {
         disabled = true;
         close();
         // Release everyone parked on a mailbox, or a suspended thread would wait for an IDE that is
-        // gone. An empty message array is read as "unrecognised", which applyCommand treats as a
+        // gone. An empty message array is read as "unrecognized", which applyCommand treats as a
         // release.
         for (ThreadState waiting : threadsById.values()) {
             waiting.mailbox.offer(DebugChannel.Command.simple(
@@ -796,7 +796,7 @@ public final class BshHook {
      * Reads the prefix list, or returns null when there is none to read.
      *
      * <p>An unreadable file returns null — "report everything" — rather than failing. A filter is an
-     * optimisation over reporting every statement and letting the IDE decide; losing it costs speed,
+     * optimization over reporting every statement and letting the IDE decide; losing it costs speed,
      * whereas throwing here would abort somebody's build over a missing temp file.
      */
     private static String[] readSourcePrefixes(String path) {
@@ -1247,7 +1247,7 @@ public final class BshHook {
             return Outcome.failed("No entry " + name + " in this map");
         }
         // Written through the map rather than through Map.Entry.setValue, which not every
-        // implementation honours once iteration has finished.
+        // implementation honors once iteration has finished.
         map.put(key, value);
         return Outcome.of(state, map.get(key));
     }
@@ -1293,7 +1293,7 @@ public final class BshHook {
      * stack trace on further lines. Only the tail of the first line belongs in an IDE error field.
      *
      * <p>The search for the echo's closing quotes starts past the expression, so quotes inside what
-     * the user typed cannot split the message in the wrong place. An unrecognised shape falls back
+     * the user typed cannot split the message in the wrong place. An unrecognized shape falls back
      * to the whole first line, which is verbose rather than wrong.
      */
     private static String describe(Throwable error, String expression) {

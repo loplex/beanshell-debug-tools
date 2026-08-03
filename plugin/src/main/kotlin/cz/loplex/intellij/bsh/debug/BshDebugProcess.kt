@@ -57,7 +57,7 @@ private const val EVAL_TIMEOUT_MS = 30_000L
  *
  * Variables are pulled rather than pushed. The agent hands out an opaque handle per expandable
  * value, valid only until the next resume, which is what lets a nested object be opened one level
- * at a time instead of every variable being serialised on every step. It is deliberately DAP's
+ * at a time instead of every variable being serialized on every step. It is deliberately DAP's
  * `variablesReference` model, so adopting DAP later is a change of encoding rather than of design.
  */
 class BshDebugProcess(
@@ -138,7 +138,7 @@ class BshDebugProcess(
      * The thread the user's last action applied to.
      *
      * Resume and the step commands arrive from the platform with an `XSuspendContext`, whose active
-     * execution stack says which thread is selected -- but the platform may also pass null, so the
+     * execution stack says which thread is selected. But the platform may also pass null, so the
      * thread that reported the stop being looked at is remembered as the fallback.
      */
     @Volatile private var lastStoppedThread: Int = 0
@@ -284,7 +284,7 @@ class BshDebugProcess(
         }
     }
 
-    /** Serialises writes: the platform calls resume/step and breakpoint changes from any thread. */
+    /** Serializes writes: the platform calls resume/step and breakpoint changes from any thread. */
     private fun writeToAgent(write: (DataOutputStream) -> Unit) {
         val out = commands ?: return
         try {
@@ -411,7 +411,7 @@ class BshDebugProcess(
     /**
      * Sends one request and waits for the reply that carries its id.
      *
-     * No longer serialised, and that is the point: two threads may be suspended, so the variables
+     * No longer serialized, and that is the point: two threads may be suspended, so the variables
      * panel for one and a watch expression on another can legitimately be in flight at the same time.
      * Each caller registers a queue under its own request id, and [deliver] wakes exactly that one.
      *

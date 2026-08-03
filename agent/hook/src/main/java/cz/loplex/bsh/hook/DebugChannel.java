@@ -17,7 +17,7 @@ import java.util.List;
  * the right way round even though DAP is the standard: the native one is the narrower of the two, so
  * everything it needs DAP can express, while the reverse is not true. Where DAP wants something the
  * hook does not track — a source reference, a variable's {@code evaluateName} — the DAP channel
- * synthesises it rather than the hook learning about it.
+ * synthesizes it rather than the hook learning about it.
  */
 interface DebugChannel {
 
@@ -63,7 +63,7 @@ interface DebugChannel {
     /**
      * Blocks until the next command arrives, or returns null at end of stream.
      *
-     * <p>Called only from the hook's single reader thread, so it needs no synchronisation of its own.
+     * <p>Called only from the hook's single reader thread, so it needs no synchronization of its own.
      */
     Command readCommand() throws IOException;
 
@@ -107,7 +107,7 @@ interface DebugChannel {
     }
 
     /**
-     * A command, normalised across the two encodings.
+     * A command, normalized across the two encodings.
      *
      * <p>Deliberately one flat type rather than a hierarchy: there are seven of them, each carrying at
      * most a handful of ints and a string or two, and the hook switches on {@link #kind} in one place.

@@ -6,7 +6,7 @@ import com.intellij.openapi.util.io.ByteSequence
 import com.intellij.openapi.vfs.VirtualFile
 
 /**
- * Recognises extensionless scripts as BeanShell from their header. A file that
+ * Recognizes extensionless scripts as BeanShell from their header. A file that
  * begins with a shebang is treated as BeanShell when either:
  *
  *  - the shebang runs a BeanShell interpreter directly, e.g.

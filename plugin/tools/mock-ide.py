@@ -136,7 +136,7 @@ def wutf(text):
 
 
 class Session:
-    """Owns the socket: one reader thread in, serialised writes out.
+    """Owns the socket: one reader thread in, serialized writes out.
 
     Every reply carries the request id it answers, so `request()` parks on a queue of its
     own instead of assuming it will be handed the next bytes to arrive.

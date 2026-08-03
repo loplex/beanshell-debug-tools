@@ -9,7 +9,7 @@ import com.intellij.openapi.project.Project
 
 /**
  * Optionally attaches IntelliJ's Java (JDWP) debugger to the forked BeanShell JVM
- * so that breakpoints in the Java code invoked from a script are honoured.
+ * so that breakpoints in the Java code invoked from a script are honored.
  *
  * Implemented purely through platform API plus the "Remote" run-configuration
  * type (id `Remote`) contributed by the Java plugin, looked up by id — so this

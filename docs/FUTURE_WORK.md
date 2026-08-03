@@ -71,7 +71,7 @@ event, so routing IntelliJ through DAP would have lost the thread support the na
 It came out cheap for the reason predicted here — only the last step of the hook turns an
 answer into bytes, so `DebugChannel` splits the transport off and everything above it is
 written once. Adopting DAP's vocabulary first (`stackTrace`/`scopes`/`variables`/`evaluate`/
-`setVariable`, handles as `variablesReference`) is what made it a serialisation change rather
+`setVariable`, handles as `variablesReference`) is what made it a serialization change rather
 than a redesign.
 
 Three translations live in `DapChannel` and are worth knowing about: frame ids have to be made
@@ -129,7 +129,7 @@ headless VS Code (`@vscode/test-electron` + Mocha, under Xvfb) starting an actua
 session against the fixture in `src/test/fixtures/workspace/`, asserting on the DAP traffic via
 a `DebugAdapterTracker`. The fixture, breakpoint line and evaluate expression are the same ones
 `07` already proved work over `DapChannel` — deliberately, so the two checks are provably
-exercising the same behaviour one layer apart rather than two fixtures that could quietly drift.
+exercising the same behavior one layer apart rather than two fixtures that could quietly drift.
 
 **The one real gap `07` cannot reach**, and the reason this is `launch` rather than `attach`:
 `dap-client.py` connects to a JVM the check already started, so it never touches this
@@ -168,7 +168,7 @@ in [`editors/vscode/README.md`](../editors/vscode/README.md#testing).
 (`nvim --headless -l`, no display server needed) against the same fixture, breakpoint line and
 evaluate expression `agent/checks/07-dap-transport.sh` and the VS Code test already prove work
 over `DapChannel` — deliberately, for the same reason the VS Code fixture matches `07`'s: so the
-three checks are provably exercising the same behaviour, not three fixtures that could drift.
+three checks are provably exercising the same behavior, not three fixtures that could drift.
 Covers what `07`'s `dap-client.py` cannot: `bsh-dap.lua`'s own `launch()` (the `jobstart` spawn,
 the `DAP: listening` stdout watch), the Neovim counterpart to what the VS Code GUI test found for
 `BshDebugAdapterDescriptorFactory.launch()`.

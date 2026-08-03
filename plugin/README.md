@@ -147,14 +147,14 @@ launch it in Debug):
 
 ## Screenshots
 
-| | |
-|---|---|
-| ![Editor](docs/images/editor.png) | ![Completion](docs/images/completion.png) |
-| Syntax highlighting & Structure view | Code completion (keywords + in-scope names) |
-| ![Navigation](docs/images/navigation.png) | ![Debugger](docs/images/debugger.png) |
-| Quick documentation into Java on a chained member | Debugger: variables + console at a breakpoint |
-| ![Maven injection](docs/images/maven-injection.png) | ![Inspection](docs/images/inspection.png) |
-| BeanShell injected into `pom.xml` | Inspection quick-fix for an unused variable |
+|                                                     |                                               |
+|-----------------------------------------------------|-----------------------------------------------|
+| ![Editor](docs/images/editor.png)                   | ![Completion](docs/images/completion.png)     |
+| Syntax highlighting & Structure view                | Code completion (keywords + in-scope names)   |
+| ![Navigation](docs/images/navigation.png)           | ![Debugger](docs/images/debugger.png)         |
+| Quick documentation into Java on a chained member   | Debugger: variables + console at a breakpoint |
+| ![Maven injection](docs/images/maven-injection.png) | ![Inspection](docs/images/inspection.png)     |
+| BeanShell injected into `pom.xml`                   | Inspection quick-fix for an unused variable   |
 
 ## Known limitations
 

@@ -24,7 +24,7 @@ nested jar.
 
 The goal is debugging BeanShell inside **third-party libraries that already bundle
 bsh** — Maven plugins such as maven-enforcer being the motivating case. The code is
-fixed; only runtime behaviour can be changed. That rules out patching BeanShell and
+fixed; only runtime behavior can be changed. That rules out patching BeanShell and
 makes an agent the only vehicle.
 
 **JDWP is not usable, and the reason is a language property rather than an
@@ -113,14 +113,14 @@ the system loader cannot define a second copy.
   are the init list, the condition, the update list *and* the body, all reporting
   the `for` line. The child layouts were read off real parse trees:
 
-  | node | children | statement position |
-  |---|---|---|
-  | `BSHIfStatement` | `[cond, then, else?]` | index ≥ 1 |
-  | `BSHWhileStatement` (`while`) | `[cond, body]` | last |
-  | `BSHWhileStatement` (`do`) | `[body, cond]` | **first** |
-  | `BSHForStatement` | `[init?, cond?, update?, body]` | last |
-  | `BSHEnhancedForStatement` | `[type?, iterable, body]` | last |
-  | `BSHSwitchStatement` | `[expr, label, stmt, …]` | index ≥ 1 |
+  | node                          | children                        | statement position |
+  |-------------------------------|---------------------------------|--------------------|
+  | `BSHIfStatement`              | `[cond, then, else?]`           | index ≥ 1          |
+  | `BSHWhileStatement` (`while`) | `[cond, body]`                  | last               |
+  | `BSHWhileStatement` (`do`)    | `[body, cond]`                  | **first**          |
+  | `BSHForStatement`             | `[init?, cond?, update?, body]` | last               |
+  | `BSHEnhancedForStatement`     | `[type?, iterable, body]`       | last               |
+  | `BSHSwitchStatement`          | `[expr, label, stmt, …]`        | index ≥ 1          |
 
   `do` and `while` are the *same node type* (`DoStatement() #WhileStatement`) with
   opposite child order, separated by the package-private `isDoStatement` field.
@@ -138,9 +138,9 @@ the system loader cannot define a second copy.
 
 ### Not bit-transparent
 
-Behaviour is unchanged — every fixture produces identical output with and without
+Behavior is unchanged — every fixture produces identical output with and without
 the agent — but **identity hash codes shift** deterministically (`Point@279f2327`
-becomes `Point@30f39991` and stays there), because initialising the hook on the
+becomes `Point@30f39991` and stays there), because initializing the hook on the
 interpreter thread advances that thread's identity-hash sequence. Nothing correct
 depends on those values, but a script printing a default `toString()` shows
 different digits.
@@ -190,7 +190,7 @@ valid until the next resume and the table is dropped there, so the IDE can never
 hold a reference into a script that has moved on — no stale-object problem to
 solve, no cleanup protocol to get wrong. That is
 [DAP's `variablesReference`](https://microsoft.github.io/debug-adapter-protocol/specification#Types_Variable)
-in a smaller encoding: adopting DAP later changes the serialisation, not the design.
+in a smaller encoding: adopting DAP later changes the serialization, not the design.
 
 Requests are served **on the thread they concern**, from inside the same loop where it
 waits for `RESUME`. Not a shortcut: that thread is parked there anyway, it owns the
@@ -218,9 +218,9 @@ does, so a filter is not optional: BeanShell's own commands (`print`, `pwd`, …
 `.bsh` files on the classpath, and without a filter the session stops inside
 `print.bsh` on every `print()` call. Two properties, ORed:
 
-| property | match | for |
-|---|---|---|
-| `bsh.debug.sources` | comma-separated, `endsWith` | a script that has a file name |
+| property                 | match                                          | for                                  |
+|--------------------------|------------------------------------------------|--------------------------------------|
+| `bsh.debug.sources`      | comma-separated, `endsWith`                    | a script that has a file name        |
 | `bsh.debug.sources.file` | a file of prefixes, one per line, `startsWith` | a script handed over as a **string** |
 
 The second exists because a string has no file name. BeanShell invents one:
@@ -300,7 +300,7 @@ correct in the CLI and does nothing in a library.
 ./gradlew :agent:samples:runHostWithAgent   # the same, under the agent
 ```
 
-The two must agree, which is what pins down "behaviour unchanged". The README
+The two must agree, which is what pins down "behavior unchanged". The README
 there lists the three differences that are legitimate.
 
 The transport itself can be exercised without the IDE, and the instrumentation

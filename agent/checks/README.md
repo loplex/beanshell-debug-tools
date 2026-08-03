@@ -8,22 +8,22 @@ End-to-end checks for the debug agent, as standalone bash scripts.
 ```
 
 Each script builds what it needs, prints one `PASS`/`FAIL` line per assertion, and exits
-non-zero if any failed. `JAVA_HOME` is honoured; the agent targets Java 8, so anything
+non-zero if any failed. `JAVA_HOME` is honored; the agent targets Java 8, so anything
 8+ works for the debugged JVM.
 
 ## Why these are not Gradle tests
 
 Each one needs something a JVM test cannot arrange from inside itself:
 
-| check | needs |
-|---|---|
-| `01-inline-eval-source-name.sh` | a JVM launched with `-javaagent`, so the interpreter is instrumented before it loads |
-| `02-maven-plugin-realm.sh` | a **real `mvn` process**, because the thing under test is a Maven plugin's own classloader |
-| `03-scopes-and-introspection.sh` | two processes and a socket between them — the actual wire protocol |
-| `04-behaviour-unchanged.sh` | the same fixtures run twice, in separate JVMs, one with the agent |
-| `05-two-script-threads.sh` | two real threads, suspended at the same time over one socket |
-| `06-suspend-all.sh` | a thread stopping at a line that has no breakpoint on it |
-| `07-dap-transport.sh` | a real DAP conversation, handshake included, over a socket |
+| check                            | needs                                                                                      |
+|----------------------------------|--------------------------------------------------------------------------------------------|
+| `01-inline-eval-source-name.sh`  | a JVM launched with `-javaagent`, so the interpreter is instrumented before it loads       |
+| `02-maven-plugin-realm.sh`       | a **real `mvn` process**, because the thing under test is a Maven plugin's own classloader |
+| `03-scopes-and-introspection.sh` | two processes and a socket between them — the actual wire protocol                         |
+| `04-behavior-unchanged.sh`       | the same fixtures run twice, in separate JVMs, one with the agent                          |
+| `05-two-script-threads.sh`       | two real threads, suspended at the same time over one socket                               |
+| `06-suspend-all.sh`              | a thread stopping at a line that has no breakpoint on it                                   |
+| `07-dap-transport.sh`            | a real DAP conversation, handshake included, over a socket                                 |
 
 They are also the checks you want *while* changing the agent, one at a time, with the
 output in front of you — which is the other reason they are scripts.
@@ -64,14 +64,14 @@ only observation that distinguishes the round-up from ordinary per-thread suspen
 thread its own code so the breakpoint can belong to one of them alone.
 
 **`07` — the DAP transport.** That the same debugger works over DAP: the handshake in the right
-order (a client that never sees `initialized` configures nothing), breakpoints honoured, a stack
+order (a client that never sees `initialized` configures nothing), breakpoints honored, a stack
 with depth, both scopes, and an expression evaluated in the stopped frame. Between them those cover
 every translation `DapChannel` performs. `dap-client.py` beside it is a standalone DAP client for
 driving a session by hand, the way `mock-ide.py` is for the native protocol.
 
-**`04` — behaviour is unchanged.** The agent must not change what a script does. Allows
+**`04` — behavior is unchanged.** The agent must not change what a script does. Allows
 exactly the three differences documented in [`../samples/README.md`](../samples/README.md)
-(identity hashes, `NameSpace` addresses, thread interleaving) by normalising them, and
+(identity hashes, `NameSpace` addresses, thread interleaving) by normalizing them, and
 requires equality otherwise.
 
 ## Adding one

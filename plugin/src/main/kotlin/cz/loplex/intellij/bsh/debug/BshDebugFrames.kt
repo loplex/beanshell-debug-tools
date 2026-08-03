@@ -151,9 +151,16 @@ class BshStackFrame(
 
     override fun computeChildren(node: XCompositeNode) {
         val children = XValueChildrenList()
+        // Locals and Global overlap: a method namespace's parent chain already reaches Global (bsh
+        // closure semantics), so anything declared at script level is reported by both scopes. Locals
+        // is listed first by `scopes`, so keeping its entry over Global's matches BeanShell's own
+        // inner-scope-wins lookup order.
+        val seen = mutableSetOf<String>()
         for ((_, handle) in source.scopes(threadId, info.id)) {
             for (variable in source.variables(threadId, handle)) {
-                children.add(variable.name, BshValue(variable, source, threadId, info.id, handle))
+                if (seen.add(variable.name)) {
+                    children.add(variable.name, BshValue(variable, source, threadId, info.id, handle))
+                }
             }
         }
         node.addChildren(children, true)

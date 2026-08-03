@@ -37,7 +37,7 @@ class BshSettingsEditor : SettingsEditor<BshRunConfiguration>() {
         interpreterClasspath.addBrowseFolderListener(
             TextBrowseFolderListener(
                 FileChooserDescriptor(true, true, true, true, false, false)
-                    .withTitle("Select bsh Jar or Classes Directory")
+                    .withTitle("Select BeanShell Jar or Classes Directory")
             )
         )
         jrePath.addBrowseFolderListener(

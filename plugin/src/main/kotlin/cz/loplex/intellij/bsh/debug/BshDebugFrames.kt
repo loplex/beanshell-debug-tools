@@ -20,6 +20,7 @@ import com.intellij.xdebugger.frame.XStackFrame
 import com.intellij.xdebugger.frame.XSuspendContext
 import com.intellij.xdebugger.frame.XValue
 import com.intellij.xdebugger.frame.XValueChildrenList
+import com.intellij.xdebugger.frame.XValueGroup
 import com.intellij.xdebugger.frame.XValueModifier
 import com.intellij.xdebugger.frame.XValueNode
 import com.intellij.xdebugger.frame.XValuePlace
@@ -154,13 +155,13 @@ class BshStackFrame(
         // Locals and Global overlap: a method namespace's parent chain already reaches Global (bsh
         // closure semantics), so anything declared at script level is reported by both scopes. Locals
         // is listed first by `scopes`, so keeping its entry over Global's matches BeanShell's own
-        // inner-scope-wins lookup order.
+        // inner-scope-wins lookup order. What is left of a scope after that is what its group shows;
+        // a scope fully shadowed by an earlier one contributes no group at all.
         val seen = mutableSetOf<String>()
-        for ((_, handle) in source.scopes(threadId, info.id)) {
-            for (variable in source.variables(threadId, handle)) {
-                if (seen.add(variable.name)) {
-                    children.add(variable.name, BshValue(variable, source, threadId, info.id, handle))
-                }
+        for ((scopeName, handle) in source.scopes(threadId, info.id)) {
+            val scopeVariables = source.variables(threadId, handle).filter { seen.add(it.name) }
+            if (scopeVariables.isNotEmpty()) {
+                children.addTopGroup(BshScopeGroup(scopeName, scopeVariables, source, threadId, info.id, handle))
             }
         }
         node.addChildren(children, true)
@@ -178,6 +179,33 @@ class BshStackFrame(
             com.intellij.ui.SimpleTextAttributes.REGULAR_ATTRIBUTES,
         )
         component.setIcon(AllIcons.Debugger.Frame)
+    }
+}
+
+/**
+ * One agent-reported scope ("Locals"/"Global"), labeled instead of flattened into the frame.
+ *
+ * Auto-expanded because [BshStackFrame.computeChildren] already filtered [variables] down to what
+ * this scope alone contributes — nothing here is redundant with a group shown above it, so there is
+ * no reason to make the user click through to see it.
+ */
+private class BshScopeGroup(
+    name: String,
+    private val variables: List<BshVariable>,
+    private val source: BshValueSource,
+    private val threadId: Int,
+    private val frameId: Int,
+    private val handle: Int,
+) : XValueGroup(name) {
+
+    override fun isAutoExpand(): Boolean = true
+
+    override fun computeChildren(node: XCompositeNode) {
+        val children = XValueChildrenList()
+        for (variable in variables) {
+            children.add(variable.name, BshValue(variable, source, threadId, frameId, handle))
+        }
+        node.addChildren(children, true)
     }
 }
 

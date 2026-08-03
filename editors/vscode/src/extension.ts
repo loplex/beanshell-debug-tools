@@ -1,3 +1,5 @@
+// noinspection JSUnusedGlobalSymbols
+
 import * as vscode from 'vscode';
 import { BshConfigurationProvider } from './configurationProvider';
 import { BshDebugAdapterDescriptorFactory } from './descriptorFactory';

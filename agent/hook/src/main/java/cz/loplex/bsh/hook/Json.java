@@ -162,10 +162,10 @@ final class Json {
     }
 
     /** A member as a list, or an empty list when absent or not an array. */
-    @SuppressWarnings("unchecked")
-    static List<Object> getList(Object object, String key) {
+    @SuppressWarnings("SameParameterValue")
+    static List<?> getList(Object object, String key) {
         Object value = get(object, key);
-        return value instanceof List ? (List<Object>) value : new ArrayList<>();
+        return value instanceof List<?> ? (List<?>) value : new ArrayList<>();
     }
 
     private static final class Parser {

@@ -44,6 +44,17 @@ dependencies {
 
 // Java 8: the agent loads into whatever JVM the host library runs on, so the floor is set
 // as low as the tooling allows.
+//
+// Both lines matter: `release` is what javac actually enforces (rejects newer bytecode AND
+// newer source syntax); `sourceCompatibility`/`targetCompatibility` is what IntelliJ's Gradle
+// sync reads to set the module's language level -- it does not evaluate `configureEach {}`
+// blocks, so without this line the IDE assumes the project default (21) and its inspections
+// suggest syntax this module can't actually compile.
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
 tasks.withType<JavaCompile>().configureEach {
     options.release.set(8)
     options.encoding = "UTF-8"

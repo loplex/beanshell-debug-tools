@@ -45,6 +45,12 @@ tasks.named<PrepareSandboxTask>("prepareTestSandbox") {
     disabledPlugins.add("org.jetbrains.plugins.vue")
 }
 
+// Cheap, no-IDE-download sanity check (plugin.xml since-build, Java/Kotlin compatibility
+// levels, stray Kotlin stdlib/coroutines deps, ...) -- not wired to `check` by default.
+tasks.named("check") {
+    dependsOn("verifyPluginProjectConfiguration")
+}
+
 // The project-level IntelliJ Platform Gradle Plugin extension: distinct from the
 // dependencies-scoped `intellijPlatform { }` block above (a different receiver type,
 // `IntelliJPlatformExtension` vs. `IntelliJPlatformDependenciesExtension`) despite the
@@ -124,7 +130,7 @@ tasks.named<Zip>("buildPlugin") {
 // It rewrites the inline script in the POM model (with the IDE-instrumented text) and
 // adds the debug-agent callback jar as a system-scoped plugin dependency. Compiled for
 // Java 8 so it loads in any Maven JVM; it never reaches the plugin's own classpath.
-val mavenExt: SourceSet by sourceSets.creating
+val mavenExt: SourceSet = sourceSets.create("mavenExt")
 
 dependencies {
     "mavenExtCompileOnly"("org.apache.maven:maven-core:3.6.3")
@@ -148,7 +154,8 @@ tasks.named<JavaCompile>("compileJava") {
     options.release.set(8)
 }
 
-val mavenExtJar by tasks.registering(Jar::class) {
+val mavenExtJar = tasks.register<Jar>("mavenExtJar") {
+    description = "Packages the Maven core extension that rewrites inline BeanShell scripts for debugging"
     archiveBaseName.set("bsh-maven-ext")
     archiveVersion.set("")
     from(mavenExt.output.classesDirs)

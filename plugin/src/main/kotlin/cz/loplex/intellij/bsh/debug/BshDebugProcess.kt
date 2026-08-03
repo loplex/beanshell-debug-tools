@@ -327,15 +327,9 @@ class BshDebugProcess(
     }
 
     private fun readStopped(input: DataInputStream) {
-        val threadId = input.readInt()
-        val threadName = input.readUTF()
-        val line = input.readInt()
-        val depth = input.readInt()
-        val frames = (0 until input.readInt()).map { index ->
-            BshFrameInfo(index, input.readUTF(), input.readUTF(), input.readInt())
-        }
-        val session = threads.computeIfAbsent(threadId) { ThreadSession(threadId, threadName) }
-        handleStep(session, line, depth, frames)
+        val report = BshDebugWireCodec.readStopped(input)
+        val session = threads.computeIfAbsent(report.threadId) { ThreadSession(report.threadId, report.threadName) }
+        handleStep(session, report.line, report.depth, report.frames)
     }
 
     /**
@@ -350,17 +344,13 @@ class BshDebugProcess(
     }
 
     private fun readScopesReply(input: DataInputStream): ScopesReply =
-        ScopesReply((0 until input.readInt()).map { input.readUTF() to input.readInt() })
+        ScopesReply(BshDebugWireCodec.readScopes(input))
 
     private fun readVariablesReply(input: DataInputStream): VariablesReply =
-        VariablesReply(
-            (0 until input.readInt()).map {
-                BshVariable(input.readUTF(), input.readUTF(), input.readUTF(), input.readInt())
-            },
-        )
+        VariablesReply(BshDebugWireCodec.readVariables(input))
 
     private fun readEvalReply(input: DataInputStream): BshEvalResult =
-        BshEvalResult(input.readBoolean(), input.readUTF(), input.readUTF(), input.readInt())
+        BshDebugWireCodec.readEvalResult(input)
 
     private class ScopesReply(val scopes: List<Pair<String, Int>>)
     private class VariablesReply(val variables: List<BshVariable>)
@@ -499,27 +489,9 @@ class BshDebugProcess(
     private fun stackFor(thread: ThreadSession): BshThreadStack =
         BshThreadStack(thread.id, thread.name, thread.frames, sourceFile, ::frameLine, this)
 
-    /**
-     * Where a frame sits in [sourceFile], or -1 when it sits somewhere else.
-     *
-     * With a [lineMapper] the decision is entirely its own — it knows the reported source names and
-     * answers -1 for anything foreign, so the injected-pom case needs no name matching here.
-     *
-     * Without one, the innermost frame is taken on trust (the agent's own source filter, or a
-     * rewritten script, already guarantees it is ours) while outer frames must be shown to be in
-     * this file: a `source()`d script or a frame entered from Java has no position in it.
-     */
-    private fun frameLine(frame: BshFrameInfo): Int {
-        lineMapper?.let { return it(frame.sourceFile, frame.line) }
-        return when {
-            frame.id == 0 -> frame.line
-            frame.line >= 1 && inSourceFile(frame.sourceFile) -> frame.line
-            else -> -1
-        }
-    }
-
-    private fun inSourceFile(reported: String): Boolean =
-        reported.isNotEmpty() && (reported.endsWith(sourceFile.name) || sourceFile.path.endsWith(reported))
+    /** Where a frame sits in [sourceFile], or -1 when it sits somewhere else. See [resolveFrameLine]. */
+    private fun frameLine(frame: BshFrameInfo): Int =
+        resolveFrameLine(frame, sourceFile.name, sourceFile.path, lineMapper)
 
     private inner class BshBreakpointHandler :
         XBreakpointHandler<XLineBreakpoint<XBreakpointProperties<*>>>(BshLineBreakpointType::class.java) {

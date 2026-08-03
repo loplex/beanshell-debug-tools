@@ -199,9 +199,14 @@
             level="WARNING"
             implementationClass="cz.loplex.intellij.bsh.inspection.BshUnresolvedMethodInspection"/>
 
-        <codeInsight.parameterNameHints
+        <codeInsight.declarativeInlayProvider
             language="BeanShell"
-            implementationClass="cz.loplex.intellij.bsh.completion.BshInlayParameterHintsProvider"/>
+            implementationClass="cz.loplex.intellij.bsh.completion.BshInlayParameterHintsProvider"
+            isEnabledByDefault="true"
+            group="PARAMETERS_GROUP"
+            providerId="bsh.parameter.hints"
+            bundle="messages.BshBundle"
+            nameKey="inlay.parameterHints.name"/>
 
         <readWriteAccessDetector
             implementation="cz.loplex.intellij.bsh.reference.BshReadWriteAccessDetector"/>

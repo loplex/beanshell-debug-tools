@@ -6,8 +6,8 @@ Eclipse has no built-in DAP client of its own; the generic one is
 own [`docs/FUTURE_WORK.md`](../../docs/FUTURE_WORK.md) already names as the reason the native
 protocol and DAP stay separate transports. Same [debug agent](../../agent/README.md), same
 [DAP transport](../../docs/PROTOCOL.md#9-relationship-to-dap) as
-[`../vscode/`](../vscode/) and [`../neovim/`](../neovim/) — this is packaging for a third
-editor, not a third implementation.
+[`../vscode/`](../vscode/README.md) and [`../neovim/`](../neovim/README.md) — this is packaging
+for a third editor, not a third implementation.
 
 **Attach only.** LSP4E's generic launcher can either start a Debug Adapter Server itself or
 connect to one already running, but starting one means spawning something that speaks DAP —
@@ -55,14 +55,14 @@ interrupt), no conditional/function/exception breakpoints, no step-back, no rest
 
 ## Manual verification runbook
 
-Unlike [`../vscode/`](../vscode/#testing) and [`../neovim/`](../neovim/#testing), there is no
-automated end-to-end test here. Both of those cover code this repository owns — the extension's
-own JVM launch, `bsh-dap.lua`'s own launch — that a hand-rolled DAP client can't exercise. There
-is no equivalent here: this package is a README, not a launcher, and LSP4E's generic Debug
-Adapter launch configuration (configured entirely through its own UI dialog) is upstream code
-this repository doesn't own. Automating it would mean standing up a second build toolchain
-(Tycho, a p2 target platform, SWTBot) to re-verify that *LSP4E* speaks DAP correctly against this
-agent — already proven, against the same agent, by
+Unlike [`../vscode/`](../vscode/README.md#testing) and [`../neovim/`](../neovim/README.md#testing),
+there is no automated end-to-end test here. Both of those cover code this repository owns — the
+extension's own JVM launch, `bsh-dap.lua`'s own launch — that a hand-rolled DAP client can't
+exercise. There is no equivalent here: this package is a README, not a launcher, and LSP4E's
+generic Debug Adapter launch configuration (configured entirely through its own UI dialog) is
+upstream code this repository doesn't own. Automating it would mean standing up a second build
+toolchain (Tycho, a p2 target platform, SWTBot) to re-verify that *LSP4E* speaks DAP correctly
+against this agent — already proven, against the same agent, by
 [`agent/checks/07-dap-transport.sh`](../../agent/checks/07-dap-transport.sh)'s `dap-client.py`.
 
 What's worth checking by hand — after touching the agent, the DAP transport, or this doc — is

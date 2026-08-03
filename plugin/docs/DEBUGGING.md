@@ -184,7 +184,7 @@ Three things the IDE side is responsible for:
   order and carry no request id, which is only sound while every request is
   answered. After a timeout the agent may still be working, and its late reply would
   otherwise be handed to the next request as its own answer — so `BshDebugProcess`
-  marks the channel desynced instead. Correlating replies is the general fix and it
+  marks the channel desynced instead. Correlating replies is the general fix, and it
   belongs with threads, which need it anyway.
 
 Evaluation has its own, much longer timeout: a watch expression is arbitrary user

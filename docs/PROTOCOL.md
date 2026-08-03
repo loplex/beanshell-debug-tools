@@ -270,7 +270,7 @@ These are what an implementation can rely on, and what it must preserve.
    request as its own answer, which is why a timed-out channel had to be written off for good.
    With ids, a late reply simply finds no waiter and is dropped.
 
-2. **By default only the thread that hit a breakpoint is suspended.** Others keep running, and
+2. **By default, only the thread that hit a breakpoint is suspended.** Others keep running, and
    may report while it is parked. A breakpoint whose policy is Suspend: All rounds them up via
    [`SET_CATCH_ALL`](#0x08-set_catch_all) — approximately, and the approximation is inherent: a
    thread is only ever stopped where it calls the hook, so one inside Java code cannot be frozen.
@@ -290,7 +290,7 @@ These are what an implementation can rely on, and what it must preserve.
 
 6. **No version negotiation**, because there is nothing to negotiate with: the agent jar ships
    inside the plugin, so both ends are always the same build. An independently published agent
-   would change this — see [`FUTURE_WORK.md`](FUTURE_WORK.md#dap-as-the-transport).
+   would change this — see [`FUTURE_WORK.md`](FUTURE_WORK.md#dap-as-a-second-transport--done).
 
 ### What the rewriting agent does differently
 

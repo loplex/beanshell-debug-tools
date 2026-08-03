@@ -97,5 +97,5 @@ a VS Code build under `.vscode-test/`.
 
 ## Alternatives
 
-[`../neovim/`](../neovim/) and [`../eclipse/`](../eclipse/) cover the same transport for those
-editors.
+[`../neovim/`](../neovim/README.md) and [`../eclipse/`](../eclipse/README.md) cover the same
+transport for those editors.

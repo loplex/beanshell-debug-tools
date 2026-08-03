@@ -66,7 +66,7 @@ public class DebugHost {
     }
 
     /**
-     * 1. Plain source() of a file. This is the common library pattern and it
+     * 1. Plain source() of a file. This is the common library pattern, and it
      * lands in Interpreter.eval(Reader, NameSpace, String) -- NOT in run().
      */
     private static void scenario1_sourceFile() throws Exception {

@@ -17,7 +17,7 @@ import cz.loplex.intellij.bsh.psi.BshElementTypes as E
  * hook is simply one extra statement executed just before the original one, which
  * keeps the transformation semantics-preserving.
  *
- * The line number baked into each hook is chosen by [lineFor]. For a standalone
+ * The line number baked into each hook is chosen by the `lineFor` callback. For a standalone
  * `.bsh` file it is the statement's own line, so breakpoints map directly. For an
  * inline script injected into a pom.xml the caller bakes the **host pom.xml line**
  * instead, so every instrumented snippet in the build reports absolute pom lines to

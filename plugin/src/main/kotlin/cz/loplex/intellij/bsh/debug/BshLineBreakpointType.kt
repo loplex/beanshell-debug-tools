@@ -36,7 +36,7 @@ class BshLineBreakpointType :
             val element = psiFile.findElementAt(offset)
             val host = element?.let { PsiTreeUtil.getParentOfType(it, PsiLanguageInjectionHost::class.java, false) }
             if (host != null && isBeanShellInjected(manager, host)) return true
-            offset = (element?.textRange?.endOffset ?: offset + 1).coerceAtLeast(offset + 1)
+            offset = (element?.textRange?.endOffset ?: (offset + 1)).coerceAtLeast(offset + 1)
         }
         return false
     }

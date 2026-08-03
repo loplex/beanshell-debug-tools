@@ -317,7 +317,7 @@ public final class BshHook {
      * channel decides how to encode it. That is what makes a second protocol a matter of one more
      * implementation rather than a second debugger.
      */
-    private static DebugChannel channel;
+    private static final DebugChannel channel;
 
     // Reflection handles, resolved once. Every BSH* node inherits these from the
     // package-private bsh.SimpleNode, so a single Method works for all of them.
@@ -328,7 +328,6 @@ public final class BshHook {
     private static Method nodeGetChild;
     private static Field whileIsDoStatement;
     private static Method callStackDepth;
-    private static Method callStackTop;
     private static Method nameSpaceGetVariableNames;
     private static Method nameSpaceGetVariable;
     private static Method nameSpaceGetParent;
@@ -635,6 +634,7 @@ public final class BshHook {
      * {@link #applyCommand}. That was never a shortcut: only that thread can safely touch its own
      * BeanShell state, and answering from here would need a lock BeanShell does not offer.
      */
+    @SuppressWarnings("ResultOfMethodCallIgnored") // mailbox is an unbounded queue; offer() cannot fail
     private static void readerLoop() {
         try {
             while (true) {
@@ -754,6 +754,7 @@ public final class BshHook {
     }
 
     /** One place for "the IDE went away", which must never abort the host program. */
+    @SuppressWarnings("ResultOfMethodCallIgnored") // mailbox is an unbounded queue; offer() cannot fail
     private static void sessionLost(IOException ex) {
         if (!disabled) {
             System.err.println("[bsh-agent] debug session disconnected; continuing without debugging ("
@@ -937,6 +938,7 @@ public final class BshHook {
      * program. Timing out means the script runs on unfiltered, which is the same outcome as an IDE that
      * never sends a breakpoint set.
      */
+    @SuppressWarnings("BusyWait") // bounded 20ms poll against a 30s deadline, not an unbounded spin
     private static boolean waitForConfiguration() {
         if (!(channel instanceof DapChannel)) {
             return true;
@@ -1585,7 +1587,7 @@ public final class BshHook {
 
                 Class<?> callStackClass = callstack.getClass();
                 callStackDepth = accessible(callStackClass.getMethod("depth"));
-                callStackTop = accessible(callStackClass.getMethod("top"));
+                Method callStackTop = accessible(callStackClass.getMethod("top"));
                 callStackToArray = accessible(callStackClass.getMethod("toArray"));
 
                 nameSpaceClass = callStackTop.invoke(callstack).getClass();

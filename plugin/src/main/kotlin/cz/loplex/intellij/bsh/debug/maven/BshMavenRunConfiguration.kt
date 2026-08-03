@@ -90,7 +90,10 @@ class BshMavenRunConfiguration(
     /** Runs on the clone: prepares instrumentation, opens the socket and injects the `-D` contract. */
     private fun setUpBeanShellDebug(environment: ExecutionEnvironment, mode: BshInstrumentationMode) {
         try {
-            val workDirPath = runnerParameters?.workingDirPath ?: return
+            // Kotlin trusts MavenRunnerParameters' @NotNull annotation on workingDirPath, but that's
+            // an upstream guarantee, not one this code controls -- keep the fallback in case it's ever wrong.
+            @Suppress("USELESS_ELVIS")
+            val workDirPath = runnerParameters.workingDirPath ?: return
             val pomFile = LocalFileSystem.getInstance().findFileByIoFile(File(workDirPath, "pom.xml")) ?: return
             val prepared = ReadAction.compute<List<BshMavenDebugSupport.Prepared>, RuntimeException> {
                 BshMavenDebugSupport.prepare(project, pomFile)

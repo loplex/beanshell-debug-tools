@@ -51,7 +51,7 @@ class BshScriptRewriterTest {
     @Test
     fun replacesExecutionLevelScript() {
         val plugin = beanshellPlugin(null)
-        plugin.addExecution(PluginExecution().apply { id = "run"; setConfiguration(config(element("script", "old;"))) })
+        plugin.addExecution(PluginExecution().apply { id = "run"; configuration = config(element("script", "old;")) })
 
         val replaced = BshScriptRewriter().instrumentPlugin(plugin, listOf(sub("script", "old;", "NEW")), callbackJar)
 

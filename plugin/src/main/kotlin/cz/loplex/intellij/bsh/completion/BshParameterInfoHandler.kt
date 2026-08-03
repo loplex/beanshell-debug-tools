@@ -1,8 +1,6 @@
 package cz.loplex.intellij.bsh.completion
 
-import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.lang.parameterInfo.CreateParameterInfoContext
-import com.intellij.lang.parameterInfo.ParameterInfoContext
 import com.intellij.lang.parameterInfo.ParameterInfoHandler
 import com.intellij.lang.parameterInfo.ParameterInfoUIContext
 import com.intellij.lang.parameterInfo.UpdateParameterInfoContext
@@ -18,10 +16,6 @@ import cz.loplex.intellij.bsh.psi.BshElementTypes as E
  * argument list of a `method(...)` call, and highlights the current argument.
  */
 class BshParameterInfoHandler : ParameterInfoHandler<PsiElement, BshMethodDeclaration> {
-
-    override fun couldShowInLookup(): Boolean = true
-
-    override fun getParametersForLookup(item: LookupElement?, context: ParameterInfoContext?): Array<Any>? = null
 
     override fun findElementForParameterInfo(context: CreateParameterInfoContext): PsiElement? {
         val arguments = argumentsAt(context.file.findElementAt(context.offset)) ?: return null

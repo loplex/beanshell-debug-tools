@@ -219,3 +219,81 @@ pull request, on `ubuntu-latest` with JDK 21 — nothing exotic needed since `mv
 already on the image. The VS Code and Neovim extension tests (Xvfb + Electron, and `nvim -l`) are
 not wired into CI yet — each needs its own runner setup (a display for the former, `nvim` and
 `git` on `PATH` for the latter) and is left for a follow-up job.
+
+### Scripted-class `super(...)` calls never resolve
+
+Found by manually enabling the (disabled-by-default) `BshUnresolvedMethod` inspection against
+the debugger fixtures in `agent/samples/scripts/` — it flagged `super(x, y)` in
+`05_scripted_class.bsh`'s `Point3D` constructor as an unresolved method call.
+
+`super` is not a keyword in `BshTokenTypes` — it lexes as a plain `IDENTIFIER`, so `super(x, y)`
+parses as an ordinary `METHOD_INVOCATION` on a call named `"super"`. `BshParser.tryClassDeclaration`
+only skips past `extends <name>` while parsing a class declaration; it never attaches that name to
+the class node. `BshResolver` therefore has nothing to walk: `classMember` only collects elements
+from a class's own subtree, and the resolve chain in `BshResolver.resolve` searches file/project
+methods and classes by name, never a superclass's members. The result is that `super(...)` inside
+*any* scripted class that subclasses another scripted class — a normal, supported BeanShell
+pattern, not a fixture curiosity — resolves to nothing.
+
+Not a release blocker: the inspection ships `enabledByDefault="false"` regardless, since BeanShell
+scripts routinely call unmodeled Java library methods and built-in commands. But it is a distinct,
+fixable gap rather than one more instance of that same disclaimer — the `extends` name is fully
+available in the AST, the plugin just never records or walks it. Fixing it needs three things:
+capture the superclass name on the class declaration node (parser), have `BshResolver`/
+`classMember` follow it when a member is not found locally, and special-case bare
+`super(...)`/`this(...)` constructor-delegation calls so they resolve to a constructor rather than
+being looked up as a method literally named `super`.
+
+### Language-inject `eval("...")`/`source("...")` string literals
+
+Same review that found the `super` gap also flagged `ghost()` in `07_eval_and_source.bsh` as
+unresolved — it is defined by `eval("ghost() { return \"ghost speaking\"; }");`, a method that
+exists only inside a string literal, never as a PSI declaration. For that specific case the flag
+is correct: the method genuinely does not exist anywhere resolution can see it.
+
+But the argument here is a constant string, not one assembled at runtime from variables or I/O —
+its contents are fully known at edit time, same as the rest of the file. The plugin already has
+the mechanism for exactly this: `BshMavenInjector` (`injection/BshMavenInjector.kt`) injects the
+`BeanShell` language into inline `<script>` text inside `pom.xml` via IntelliJ's `MultiHostInjector`,
+after which the whole tool-chain — highlighting, resolution, even debugger breakpoints via
+`BshLineBreakpointType`'s injected-host handling — treats that text as if it were a `.bsh` file.
+Nothing structurally prevents doing the same for the string-literal argument of an `eval(...)` or
+`source(...)` call: inject `BeanShell` into the literal, and `ghost()` becomes a real, resolvable
+`METHOD_DECLARATION` inside it — Ctrl+Click, rename, and this same inspection all start working
+across the injected boundary for free, the same way they already do for the Maven case.
+
+Scope stays narrow by construction: only a literal string argument qualifies (no concatenation, no
+variable). `eval(loadFromNetwork())` or `eval("go" + suffix + "()")` remain genuinely unresolvable,
+same as today — the point is not to chase those, only to stop flagging the case where the source
+text is sitting right there in the file.
+
+### Resolve BeanShell's built-in commands (`print`, `exec`, `source`, …)
+
+`BshUnresolvedMethodInspection` flags every bare call to a BeanShell built-in command —
+`print(...)`, `exec(...)`, `source(...)`, and the rest of `bsh/commands/` in the interpreter jar —
+because `BshResolver` only ever looks for a `METHOD_DECLARATION` in the current file or elsewhere
+in the project. Built-in commands are not Java methods and carry no PSI of their own: BeanShell's
+`NameSpace` resolves an unknown call name at runtime by searching the classpath for a
+`bsh/commands/<name>.bsh` (or `.class`) resource, first under its default package, then under
+whatever paths a script has added via `importCommands("some.package")`.
+
+Two ways to close this, worth doing in order:
+
+- **Cheap, immediate**: bundle a static list of command names for the BeanShell version(s) this
+  plugin targets (`bsh-2.0b6.jar!/bsh/commands/` has 54 entries, extracted with one `unzip -l`) as
+  a plugin resource — the same "data, not code" shape `beanshell/maven-scripts.txt` already uses
+  for the Maven inline-script list. Suppresses the false positive for every stock command with no
+  platform-API work.
+- **More thorough, same shape as the existing Java import resolution**: `BshJavaResolver.imports()`
+  already walks a file's `IMPORT_DECLARATION`s to build a search list for Java class names —
+  `importCommands("path")` is the same idea aimed at commands instead of classes. Enumerating the
+  actual classpath roots reachable from the module (`OrderEnumerator`/`ModuleRootManager`, the same
+  class of platform API `JavaPsiFacade` already relies on for class resolution) for `bsh/commands/`
+  resources, honoring any `importCommands(...)` path a script adds, covers custom or forked
+  BeanShell jars too — not just the one pinned version — at the cost of the classpath-scanning code
+  the static list does not need.
+
+`importObject(anObject)` is a different mechanism — it imports an *object's* methods into scope at
+runtime, not a search path — and stays out of scope for the same reason arbitrary Java library
+methods on untyped variables do: resolving it statically would need to know the object's type,
+which is exactly the boundary `BshTypeInference` already draws.

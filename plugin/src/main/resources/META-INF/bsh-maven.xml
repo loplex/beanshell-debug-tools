@@ -18,7 +18,8 @@
          goal/phase context menu (Maven.BuildMenu). -->
     <actions resource-bundle="messages.BshBundle">
         <action id="Bsh.CreateMavenRunConfiguration"
-                class="cz.loplex.intellij.bsh.debug.maven.BshMavenCreateRunConfigurationAction">
+                class="cz.loplex.intellij.bsh.debug.maven.BshMavenCreateRunConfigurationAction"
+                icon="cz.loplex.intellij.bsh.BshIcons.MAVEN">
             <add-to-group group-id="Maven.BuildMenu" anchor="after" relative-to-action="Maven.CreateRunConfiguration"/>
         </action>
     </actions>

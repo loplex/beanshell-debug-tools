@@ -1,3 +1,4 @@
+import org.apache.tools.ant.filters.ReplaceTokens
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask
@@ -52,6 +53,13 @@ tasks.named("check") {
     dependsOn("verifyPluginProjectConfiguration")
 }
 
+// plugin.xml's <description> embeds screenshots via raw.githubusercontent.com, pinned to a git
+// tag (not `main`) so they don't move under a later push once a version is live on the
+// Marketplace. The tag isn't known until release.yml passes -Pversion=X.Y.Z (see
+// docs/RELEASING.md), so plugin.xml carries the placeholder token "@IMAGE_TAG@" and this value
+// is substituted in at build time instead of being hand-edited per release.
+val imageTag = "v${project.version}"
+
 // Renders plugin.xml's <description> (the Marketplace listing text) as a standalone HTML
 // file, so it can be reviewed in a browser -- exactly as JetBrains Marketplace will show it --
 // without publishing anything. Not wired to `build`; run it on demand after editing the
@@ -73,6 +81,13 @@ tasks.register("renderMarketplaceDescription") {
             .item(0)
             .textContent
             .trim()
+            // Point at the images on disk instead of the tagged GitHub URL a real release
+            // resolves to (see processResources below): this preview has no need for network
+            // access, and a dev -SNAPSHOT version's tag doesn't exist yet to 404 against.
+            .replace(
+                "https://raw.githubusercontent.com/loplex/beanshell-debug-tools/@IMAGE_TAG@/plugin/docs/images/",
+                "../docs/images/",
+            )
 
         val html = """
             |<!doctype html>
@@ -216,6 +231,16 @@ val mavenExtJar = tasks.register<Jar>("mavenExtJar") {
 // Kept at a top-level resource path (not under the cz/loplex/... package tree) so the
 // plugin's jar assembly does not drop it.
 tasks.named<Copy>("processResources") {
+    // See the `imageTag` comment above renderMarketplaceDescription: resolves the
+    // screenshot URLs in plugin.xml's <description> to the tag this build's version implies.
+    // Copied to a plain local first -- capturing `imageTag` itself in the filesMatching action
+    // below would close over this build script's instance, which the configuration cache
+    // refuses to serialize (the same failure `renderMarketplaceDescription` avoids by not
+    // referencing it from inside its own doLast).
+    val tag = imageTag
+    filesMatching("**/plugin.xml") {
+        filter(ReplaceTokens::class, "tokens" to mapOf("IMAGE_TAG" to tag))
+    }
     from(mavenExtJar) {
         into("beanshell")
     }

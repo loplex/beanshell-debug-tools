@@ -28,7 +28,7 @@
         Source, issue tracker and full documentation:
         <a href="https://github.com/loplex/beanshell-debug-tools">github.com/loplex/beanshell-debug-tools</a>.
         <br><br>
-        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/editor.png" width="700" alt="Syntax highlighting and Structure view"/>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/@IMAGE_TAG@/plugin/docs/images/editor.png" width="700" alt="Syntax highlighting and Structure view"/>
         <br><br>
         <b>Editing</b>
         <ul>
@@ -49,16 +49,16 @@
             <li>Inspections with quick fixes: unused variable/parameter, unreachable code, and an opt-in unresolved method call check</li>
             <li>Introduce Variable intention and Go to Symbol</li>
         </ul>
-        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/completion.png" width="700" alt="Code completion for keywords and in-scope names"/>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/@IMAGE_TAG@/plugin/docs/images/completion.png" width="700" alt="Code completion for keywords and in-scope names"/>
         <br><br>
-        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/inspection.png" width="700" alt="Inspection quick-fix for an unused variable"/>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/@IMAGE_TAG@/plugin/docs/images/inspection.png" width="700" alt="Inspection quick-fix for an unused variable"/>
         <br><br>
         <b>Java interoperability</b> <i>(requires the Java plugin &mdash; optional)</i>
         <ul>
             <li>Ctrl+Click into Java: class names (FQN, <code>java.lang.*</code>, imported), and members reached through static type propagation across a chain, e.g. <code>report.append("x").append("y")</code> or <code>list.get(0)</code></li>
             <li>BeanShell class members: <code>greeter.greet()</code> navigates to the <code>greet</code> method of a <code>Greeter</code> class declared in the script</li>
         </ul>
-        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/navigation.png" width="700" alt="Quick documentation into Java on a chained member"/>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/@IMAGE_TAG@/plugin/docs/images/navigation.png" width="700" alt="Quick documentation into Java on a chained member"/>
         <br><br>
         <b>Running</b>
         <ul>
@@ -73,7 +73,7 @@
             <li>Two instrumentation mechanisms, chosen per run configuration: a JVM agent that leaves the script on disk untouched (default), or rewriting the script, which needs no agent jar and no JVM flag but shows one frame and cannot evaluate</li>
             <li>With the Java plugin present, breakpoints in the Java code called from a script are honored by a companion Java (JDWP) debug session</li>
         </ul>
-        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/debugger.png" width="700" alt="Debugger: variables and console at a breakpoint"/>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/@IMAGE_TAG@/plugin/docs/images/debugger.png" width="700" alt="Debugger: variables and console at a breakpoint"/>
         <br><br>
         <b>File recognition &amp; injection</b>
         <ul>
@@ -82,7 +82,7 @@
             <li>Inline scripts in the <code>&lt;configuration&gt;</code> of several Maven plugins (beanshell-maven-plugin, maven-enforcer-plugin, build-helper-maven-plugin &mdash; the list is easy to extend)</li>
             <li>Any XML element preceded by a <code>&lt;!--language=BeanShell--&gt;</code> comment</li>
         </ul>
-        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/v0.1.1/plugin/docs/images/maven-injection.png" width="700" alt="BeanShell injected into pom.xml"/>
+        <img src="https://raw.githubusercontent.com/loplex/beanshell-debug-tools/@IMAGE_TAG@/plugin/docs/images/maven-injection.png" width="700" alt="BeanShell injected into pom.xml"/>
         <br><br>
         <b>Known limitations</b>
         <ul>

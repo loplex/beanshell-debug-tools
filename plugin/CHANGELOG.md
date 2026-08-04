@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-04
+
+### Added
+
+- The Variables view now shows Locals and Global as labeled groups, and shows a nested
+  `Block`/`Closure` scope (a `for`/`if` body, or a closure's captured namespace) between
+  them as its own group, instead of flattening every scope into the frame's children.
+
+### Fixed
+
+- Fix missing icon on the "Create BeanShell-Enhanced Maven Configuration" action.
+
+### Changed
+
+- Renamed the plugin from "BeanShell Language Support" to "BeanShell Language & Debug".
+
 ## [0.1.1] - 2026-08-01
 
 ### Fixed

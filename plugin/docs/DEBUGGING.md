@@ -52,6 +52,18 @@ in the pom, with `-javaagent` on its JVM. The agent reaches BeanShell inside a M
 plugin realm because its hook sits on the **bootstrap** classpath — the case that
 requirement was designed for in the first place.
 
+**`genthaler:beanshell-maven-plugin` specifically runs on BeanShell 1.3.0, not the
+version it declares.** It depends directly on `org.beanshell:bsh:2.0b5`, but also pulls
+`org.codehaus.plexus:plexus-bsh-factory` transitively, whose own dependency is
+`bsh:bsh:1.3.0` — a different Maven coordinate for the same package, so nothing dedupes
+it against the 2.0b5 the plugin asked for. Whichever jar the plugin realm's classloader
+resolves first wins the whole `bsh.*` package; `-Xlog:class+load` against a real build
+confirms it is the 2003-era 1.3.0. A typed variable declared in a `for`-loop's own init
+(`for (int i = 1; ...)`) does not surface the same way it does on 2.0b5/2.0b6 — an
+untyped one (`for (i = 1; ...)`) does. Nothing in this repository can fix another
+plugin's own dependency tree; a script meant to be debugged through this particular
+plugin should stick to untyped locals.
+
 The agent is preferred because rewriting is visible to the user: the injected call
 becomes a real statement, so it shows up in `getInvocationText()` and therefore in
 error messages and stack traces. Rewriting also cannot reach scripts the plugin

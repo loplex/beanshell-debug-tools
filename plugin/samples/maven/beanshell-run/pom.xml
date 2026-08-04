@@ -18,6 +18,17 @@
                 <groupId>com.github.genthaler</groupId>
                 <artifactId>beanshell-maven-plugin</artifactId>
                 <version>1.4</version>
+                <configuration>
+                    <script><![CDATA[
+                        name = project.getName();
+                        total = 0;
+                        for (i = 1; i <= 3; i++) {
+                            total += i;
+                            print("Building " + name + " step " + i);
+                        }
+                        print("sum = " + total);
+                        ]]></script>
+                </configuration>
                 <executions>
                     <execution>
                         <id>greet</id>
@@ -25,17 +36,6 @@
                         <goals>
                             <goal>run</goal>
                         </goals>
-                        <configuration>
-                            <script><![CDATA[
-                                name = project.getName();
-                                total = 0;
-                                for (int i = 1; i <= 3; i++) {
-                                    total += i;
-                                    print("Building " + name + " step " + i);
-                                }
-                                print("sum = " + total);
-                            ]]></script>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>

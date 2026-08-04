@@ -43,20 +43,29 @@ dependencies {
 }
 
 // Java 8: the agent loads into whatever JVM the host library runs on, so the floor is set
-// as low as the tooling allows.
+// as low as the tooling allows -- java.lang.instrument (Instrumentation, premain) doesn't
+// exist before Java 5, and Gradle toolchain provisioning doesn't reach below 8, so 8 is the
+// practical floor either way.
 //
-// Both lines matter: `release` is what javac actually enforces (rejects newer bytecode AND
-// newer source syntax); `sourceCompatibility`/`targetCompatibility` is what IntelliJ's Gradle
-// sync reads to set the module's language level -- it does not evaluate `configureEach {}`
-// blocks, so without this line the IDE assumes the project default (21) and its inspections
-// suggest syntax this module can't actually compile.
+// The toolchain makes the Gradle daemon fork an actual JDK 8 javac for this subproject,
+// rather than JDK 21's javac emulating one via `release` -- which is also why this avoids
+// the "source/target 8 is obsolete" warning javac 20+ prints when asked to emulate 8 itself.
+// No `release` flag here: that's a JDK 9+ flag javac 8 doesn't understand, and the
+// toolchain's own source/target default already is 8.
+//
+// sourceCompatibility/targetCompatibility stay alongside the toolchain because IntelliJ's
+// Gradle sync reads them to set the module's language level -- it does not evaluate
+// `configureEach {}` blocks, so without this line the IDE assumes the project default (21)
+// and its inspections suggest syntax this module can't actually compile.
 java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(8))
+    }
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
 }
 
 tasks.withType<JavaCompile>().configureEach {
-    options.release.set(8)
     options.encoding = "UTF-8"
 }
 

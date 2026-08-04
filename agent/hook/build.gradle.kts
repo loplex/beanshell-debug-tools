@@ -14,15 +14,19 @@ plugins {
 group = "cz.loplex.bsh"
 description = "Bootstrap-loaded hook invoked by the instrumented BeanShell interpreter"
 
-// See agent/instrument/build.gradle.kts for why sourceCompatibility is declared here too,
-// alongside `release`: IntelliJ's Gradle sync doesn't evaluate `configureEach {}` blocks.
+// See agent/instrument/build.gradle.kts for why the toolchain forks an actual JDK 8 javac
+// (no `--release` flag: that's a JDK 9+ flag javac 8 doesn't understand -- the toolchain's
+// own source/target default already is 8), and why sourceCompatibility is declared here too:
+// IntelliJ's Gradle sync doesn't evaluate `configureEach {}` blocks.
 java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(8))
+    }
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
 }
 
 tasks.withType<JavaCompile>().configureEach {
-    options.release.set(8)
     options.encoding = "UTF-8"
 }
 

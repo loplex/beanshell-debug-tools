@@ -208,15 +208,34 @@ dependencies {
     testImplementation("org.codehaus.plexus:plexus-utils:3.6.1")
 }
 
+// Both tasks below fork an actual JDK 8 javac via a per-task toolchain, rather than have
+// JDK 21 (running the rest of this project's Kotlin compilation) emulate one via `release`.
+// A per-task toolchain, not a project-wide `java { toolchain {} }`, is what keeps this from
+// dragging the Kotlin compilation down to 8 too.
+//
+// The IntelliJ Platform Gradle plugin sets `options.release`'s *convention* to 21 project-wide
+// (to match the target platform), on every JavaCompile task via `configureEach`. `options.release
+// .set(null)` would only clear an explicit value and fall back to that convention -- it takes
+// `convention(null)`, which replaces the convention outright, to make the property truly absent.
+// That matters here because Gradle emits `--release <value>` whenever the property has ANY
+// value, convention or not, and a JDK 8 javac doesn't understand that flag regardless of the
+// number that follows it (it's a JDK 9+ flag) -- so the property has to end up unset, not just
+// pointed at 8.
+val jdk8Compiler = javaToolchains.compilerFor {
+    languageVersion.set(JavaLanguageVersion.of(8))
+}
+
 tasks.named<JavaCompile>("compileMavenExtJava") {
-    options.release.set(8)
+    javaCompiler.set(jdk8Compiler)
+    options.release.convention(null as Int?)
 }
 
 // The debug agent (the only code in src/main/java) is loaded inside foreign JVMs — the forked
 // BeanShell interpreter and, for pom.xml debugging, the Maven JVM (which may run an older JDK).
 // Keep its bytecode at Java 8 so it loads regardless of the target runtime.
 tasks.named<JavaCompile>("compileJava") {
-    options.release.set(8)
+    javaCompiler.set(jdk8Compiler)
+    options.release.convention(null as Int?)
 }
 
 val mavenExtJar = tasks.register<Jar>("mavenExtJar") {

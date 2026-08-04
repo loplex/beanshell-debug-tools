@@ -85,6 +85,12 @@ Line numbers assume the current `showcase.bsh` (factorial spans lines 23–31).
   offers keywords, not members, so use a bare-prefix trigger instead. Composite.
 - **maven-injection.png** — open `pom.xml`, `Ctrl+Home`. The BeanShell inside
   `<script>` shows the injection background + BSH syntax. Capture the IDE window.
+- **maven-completion.png** — same `pom.xml`, caret on a blank line inside the
+  `<script>`, bare-prefix trigger (`Ctrl+Space` after typing a letter) so the popup
+  shows in-scope names alongside keywords, the same way `completion.png` does for
+  `.bsh`. Composite. If the sample's own script has no convenient blank line, add
+  one on disk (edit + reload), capture, then remove it — same as `inspection.png`'s
+  throwaway line.
 - **navigation.png** — caret on an `append` in the chain (`57:10`), `Ctrl+Q`
   (Quick Documentation) → `java.lang.StringBuilder append(Object)`. Composite the
   popup (~375×425). Make sure no stray breakpoint dot is in the gutter.
@@ -124,6 +130,35 @@ Line numbers assume the current `showcase.bsh` (factorial spans lines 23–31).
   mouseup 1`.
 - A leftover inline "factorial" hint sometimes floats in the editor while paused;
   click an empty editor spot + `Escape` to clear it before capturing.
+- **Expand both `Locals` and `Global`.** Since the scope redesign the Variables
+  tree shows a group per namespace level rather than flattening everything into
+  one, so this is the shot's whole point: `Locals` holds `factorial`'s own
+  `n`/`sub`/`result`, `Global` holds the script's top-level state
+  (`greeter`/`numbers`/…) — both auto-expanded, and neither repeating the other's
+  variables. Scroll so both groups are visible in the same capture.
+
+## Debugging inside Maven (maven-debug.png)
+
+Same idea as `debugger.png`, but through a Maven build —
+`samples/maven/build-helper/pom.xml` (the `build-helper-maven-plugin`'s
+`bsh-property` goal; the symlinked demo project sees it too). Create a temporary
+run configuration for the `validate` phase the same way (`Ctrl+Shift+F10` on the
+`pom.xml`), then debug it. Breakpoint on
+`print("Building " + name + " step " + i);`, inside the `for` loop.
+
+**Expand both `Block` and `Global`.** `Block` holds the `for` loop's own `i`;
+`Global` holds everything the script and the plugin bind at the top level —
+`name`, `total`, plus the plugin's own `project`/`session`/`log`/`logger`/
+`settings`/`model`. That is the shot's whole point: the nested scope grouping
+(see `debugger.png`) survives running inside a Maven plugin realm, not just a
+plain agent launch.
+
+**`genthaler:beanshell-maven-plugin`** (the `samples/maven/beanshell-run` sample)
+is the exception — it actually runs on BeanShell 1.3.0, not 2.0b6, because of a
+transitive dependency conflict in that specific plugin's own dependency tree (see
+[`DEBUGGING.md`](../DEBUGGING.md)'s Maven section), so its `for` loop does not
+split out its own `Block` level the same way. Not worth a screenshot of its own;
+the prose there covers it.
 
 ## Cleanup after a session
 

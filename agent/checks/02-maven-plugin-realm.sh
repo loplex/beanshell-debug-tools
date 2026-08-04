@@ -34,7 +34,7 @@ MAVEN_OPTS="-javaagent:$AGENT_JAR -Dbsh.debug.trace=1" \
     mvn -o -q -f "$POM" validate > "$CHECK_TMP/bh.txt" 2>&1
 grep 'bsh-agent' "$CHECK_TMP/bh.txt" > "$CHECK_TMP/bh-agent.txt" || true
 
-assert_contains "$CHECK_TMP/bh-agent.txt" 'src=inline evaluation of: ``prefix = project.getArtifactId();' \
+assert_contains "$CHECK_TMP/bh-agent.txt" 'src=inline evaluation of: ``name = project.artifactId + ":" + project.version;' \
     "build-helper: the inline <source> is instrumented inside the plugin realm" "$CHECK_TMP/bh.txt"
 assert_contains "$CHECK_TMP/bh-agent.txt" 'line=1 src=inline evaluation of' \
     "build-helper: lines are snippet-relative (first statement is line 1)" "$CHECK_TMP/bh.txt"

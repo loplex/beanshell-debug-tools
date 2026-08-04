@@ -153,8 +153,10 @@ launch it in Debug):
 | Syntax highlighting & Structure view                | Code completion (keywords + in-scope names)   |
 | ![Navigation](docs/images/navigation.png)           | ![Debugger](docs/images/debugger.png)         |
 | Quick documentation into Java on a chained member   | Debugger: variables + console at a breakpoint |
-| ![Maven injection](docs/images/maven-injection.png) | ![Inspection](docs/images/inspection.png)     |
-| BeanShell injected into `pom.xml`                   | Inspection quick-fix for an unused variable   |
+| ![Maven injection](docs/images/maven-injection.png) | ![Maven completion](docs/images/maven-completion.png) |
+| BeanShell injected into `pom.xml`                   | Completion inside an injected Maven `<script>` |
+| ![Inspection](docs/images/inspection.png)           | ![Maven debugger](docs/images/maven-debug.png) |
+| Inspection quick-fix for an unused variable         | Debugger: nested scopes through a Maven build |
 
 ## Known limitations
 

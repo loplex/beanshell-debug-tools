@@ -94,7 +94,24 @@ serializations of the same instrumentation underneath.
   script calls into, for free, wherever the platform already wraps the JVM (e.g. debugging
   an inline Maven script).
 
-Full details, screenshots and known limitations: [`plugin/README.md`](plugin/README.md).
+Full details and known limitations: [`plugin/README.md`](plugin/README.md).
+
+### Screenshots
+
+![BeanShell plugin screenshots](plugin/docs/images/showcase.gif)
+
+Click a thumbnail to open it full-size:
+
+<p>
+  <a href="plugin/docs/images/editor.png"><img src="plugin/docs/images/editor.png" width="120" alt="Editor" title="Syntax highlighting &amp; Structure view"></a>
+  <a href="plugin/docs/images/completion.png"><img src="plugin/docs/images/completion.png" width="120" alt="Completion" title="Code completion (keywords + in-scope names)"></a>
+  <a href="plugin/docs/images/navigation.png"><img src="plugin/docs/images/navigation.png" width="120" alt="Navigation" title="Quick documentation into Java on a chained member"></a>
+  <a href="plugin/docs/images/debugger.png"><img src="plugin/docs/images/debugger.png" width="120" alt="Debugger" title="Debugger: variables + console at a breakpoint"></a>
+  <a href="plugin/docs/images/maven-injection.png"><img src="plugin/docs/images/maven-injection.png" width="120" alt="Maven injection" title="BeanShell injected into pom.xml"></a>
+  <a href="plugin/docs/images/maven-completion.png"><img src="plugin/docs/images/maven-completion.png" width="120" alt="Maven completion" title="Completion inside an injected Maven &lt;script&gt;"></a>
+  <a href="plugin/docs/images/inspection.png"><img src="plugin/docs/images/inspection.png" width="120" alt="Inspection" title="Inspection quick-fix for an unused variable"></a>
+  <a href="plugin/docs/images/maven-debug.png"><img src="plugin/docs/images/maven-debug.png" width="120" alt="Maven debugger" title="Debugger: nested scopes through a Maven build"></a>
+</p>
 
 ## Editors: VS Code, Neovim, Eclipse
 

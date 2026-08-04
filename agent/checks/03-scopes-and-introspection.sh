@@ -5,11 +5,12 @@
 # Drives the real transport -- mock-ide.py is the IDE end -- so this covers the socket conversation
 # as well as the values, which no unit test on either side does alone.
 #
-# The two things asserted here are easy to regress invisibly. A bsh.This must expand to the
+# The three things asserted here are easy to regress invisibly. A bsh.This must expand to the
 # *namespace* it stands for rather than to its Java fields (that is what makes a closure's captured
-# scope, a scripted instance's _bshThis... field, and a This handed back to Java all readable), and
-# Global must appear when stopped inside a method, since that is where a script's top-level state
-# would otherwise become invisible.
+# scope, a scripted instance's _bshThis... field, and a This handed back to Java all readable), Global
+# must appear when stopped inside a method, since that is where a script's top-level state would
+# otherwise become invisible, and a `for` loop's own namespace must appear as its own level rather
+# than being lost inside Locals' or absorbed into Global.
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -78,5 +79,47 @@ assert_contains "$CHECK_TMP/ide.txt" 'count = 0 (int)' \
     "a bsh.This expands to its namespace (the closure's captured 'count')"
 assert_not_contains "$CHECK_TMP/ide.txt" 'declaringInterpreter' \
     "expanding a This does not leak bsh.XThis's own Java fields"
+
+# --- a `for` loop's own namespace is its own scope level ------------------------------------------
+#
+# BSHForStatement wraps the loop in a BlockNameSpace of its own (holding the init variable) and the
+# body runs in a second, subordinate BlockNameSpace -- two levels below the script's own Locals used
+# to be flattened into one, hiding a typed loop variable declared in the `for`'s own init behind
+# whichever scope's ancestor-walk happened to reach it first.
+
+cat > "$CHECK_TMP/forloop.bsh" <<'EOF'
+total = 0;
+for (int i = 1; i <= 3; i++) {
+    total += i;
+    print("step " + i);
+}
+EOF
+
+PORT2=$((20000 + RANDOM % 20000))
+python3 "$REPO_ROOT/plugin/tools/mock-ide.py" "$PORT2" \
+    --breakpoints forloop.bsh:3 --expand > "$CHECK_TMP/for-ide.txt" 2>&1 &
+FOR_IDE_PID=$!
+
+for _ in $(seq 50); do
+    grep -q 'listening on' "$CHECK_TMP/for-ide.txt" 2>/dev/null && break
+    sleep 0.1
+done
+
+"$JAVA" -javaagent:"$AGENT_JAR" -Dbsh.debug.port="$PORT2" -Dbsh.debug.sources=forloop.bsh \
+    -cp "$BSH_CLASSPATH" bsh.Interpreter "$CHECK_TMP/forloop.bsh" \
+    > "$CHECK_TMP/for-script.txt" 2>&1
+wait "$FOR_IDE_PID" 2>/dev/null || true
+
+assert_contains "$CHECK_TMP/for-ide.txt" 'Block:' \
+    "the for-loop's own namespace is offered as a level of its own"
+assert_contains "$CHECK_TMP/for-ide.txt" 'i = 1 (int)' \
+    "the loop variable is visible, in the Block level it was actually declared in" "$CHECK_TMP/for-ide.txt"
+
+# Global's own slice of the report, isolated so the assertion below cannot pass just because "i"
+# legitimately appears a few lines up, under Block.
+sed -n '/  Global:/,/^\[mock-ide\] STOPPED\|^\[mock-ide\] agent disconnected/p' "$CHECK_TMP/for-ide.txt" \
+    > "$CHECK_TMP/for-global-only.txt"
+assert_not_contains "$CHECK_TMP/for-global-only.txt" 'i = 1 (int)' \
+    "the loop variable is not repeated in Global -- each level reports only its own" "$CHECK_TMP/for-ide.txt"
 
 finish

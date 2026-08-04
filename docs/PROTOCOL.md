@@ -108,14 +108,19 @@ byte  0x11
 int   requestId     echoes the request
 int   count
 count times:
-  utf name          "Locals", "Global"
+  utf name          "Locals", "Block", "Closure", "Global"
   int  handle       never 0
 ```
 
-`Locals` is the frame's namespace; expanding it walks the parent chain, so it shows
-everything the script can see from there. `Global` is the interpreter's own namespace,
-present only when it is a *different* object from the frame's (i.e. not at top level)
-and only under the instrumenting agent — the rewriting one has no `Interpreter` to ask.
+One scope per level of the frame's namespace chain, innermost first, each reporting only
+the variables declared directly in that level rather than everything visible from it. The
+innermost level is always `Locals`; a `for`/`if` body or a closure's captured namespace
+between it and the top is its own `Block` or `Closure` level, so (for example) a `for`
+loop's own init variable shows up under its `Block` instead of being folded into `Locals`.
+`Global` is the interpreter's own namespace, the last level reached (identified by object
+identity, not position) and present only when it is a *different* object from the frame's
+(i.e. not at top level) and only under the instrumenting agent — the rewriting one has no
+`Interpreter` to ask.
 
 ### `0x12 VARIABLES` — answers `0x05`
 

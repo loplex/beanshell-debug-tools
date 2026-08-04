@@ -157,6 +157,17 @@ then for a value's children when the user expands it. `BshStackFrame` and
 Nested objects, collections, maps and arrays therefore expand in the Variables
 panel, and a value nobody looks at is never serialized.
 
+**Scopes are one group per level of the namespace chain**, innermost first —
+`Locals`, then any `Block` or `Closure` levels a nested scope (a `for`/`if` body, a
+closure's captured namespace) sits between it and the top, then `Global` once the
+walk reaches the interpreter's own namespace. Each level reports only the variables
+declared directly in it (`BshHook.collectNamespaceLevel`); nothing is repeated
+between levels, so a loop's own init variable shows up under `Block` rather than
+being lost inside whichever level's own reporting happened to reach it first.
+Expanding a closure's captured `This`, by contrast, still walks its whole parent
+chain as one value (`BshHook.collectNamespace`) — that case has no levels to keep
+apart, only a single namespace to show completely.
+
 **The two mechanisms differ here**, and the protocol lets them say so. The agent is
 handed the whole `CallStack`, so it reports every frame. The rewriting fallback is
 handed a single `NameSpace`, which does not know its caller, so it reports one

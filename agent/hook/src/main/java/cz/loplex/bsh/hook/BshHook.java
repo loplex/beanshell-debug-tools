@@ -1023,28 +1023,62 @@ public final class BshHook {
      * Answers {@link DebugChannel.Command.Kind#SCOPES}: the scopes of one frame, each a handle the
      * IDE can expand.
      *
-     * <p>Two scopes, and the second is the point of having the level at all: <b>Global</b> is the
-     * interpreter's own namespace, which is where a script's top-level state lives once execution has
-     * descended into a method. Without it, stopping inside a method shows the method's locals and
-     * nothing else — the script's own globals become invisible exactly when they are most likely to
-     * be what is wrong.
+     * <p>One scope per level of the namespace chain, innermost first, each reporting only the
+     * variables declared directly in it — not its own view of everything an enclosing scope also
+     * holds. A {@code for} loop's own namespace and the block inside it are two such levels, so a
+     * loop variable declared in the {@code for}'s init no longer gets lost inside a "Locals" group
+     * whose own reporting already walked past it while gathering something else.
      *
-     * <p>Global is omitted when it <i>is</i> the frame's namespace (a stop at top level, where the two
-     * are the same object) and when there is no interpreter to ask — the rewriting path, which is
-     * handed a namespace only.
+     * <p><b>Global</b> — the interpreter's own namespace, where a script's top-level state lives once
+     * execution has descended into a method — is the last level reached, identified by object
+     * identity rather than by position: without it, stopping inside a method would show the method's
+     * locals and nothing else, exactly when the script's own globals are most likely to be what is
+     * wrong. It is naturally absent when the walk never reaches it — the rewriting path, which is
+     * handed a namespace only and has no interpreter to ask.
      */
     private static List<DebugChannel.Scope> collectScopes(ThreadState state, int frameId) {
         Object namespace = frame(state, frameId);
         Object global = globalNameSpace(state);
-        boolean hasGlobal = global != null && global != namespace;
-        List<DebugChannel.Scope> scopes = new ArrayList<>(2);
-        if (namespace != null) {
-            scopes.add(new DebugChannel.Scope("Locals", handleFor(state, namespace)));
-        }
-        if (hasGlobal) {
-            scopes.add(new DebugChannel.Scope("Global", handleFor(state, global)));
+        List<DebugChannel.Scope> scopes = new ArrayList<>();
+        Object level = namespace;
+        boolean innermost = true;
+        while (level != null) {
+            String name = innermost ? "Locals" : level == global ? "Global" : levelName(level);
+            scopes.add(new DebugChannel.Scope(name, handleFor(state, new ScopeLevel(level))));
+            if (level == global) {
+                break;
+            }
+            innermost = false;
+            level = parentOf(level);
         }
         return scopes;
+    }
+
+    /** A block ("for", "if", …) or a closure's own namespace, once its parent has already been walked. */
+    private static String levelName(Object namespace) {
+        return "BlockNameSpace".equals(simpleName(namespace)) ? "Block" : "Closure";
+    }
+
+    /** {@code NameSpace.getParent()}, or null once the chain ends or cannot be read further. */
+    private static Object parentOf(Object namespace) {
+        try {
+            return nameSpaceGetParent.invoke(namespace);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * One level of {@link #collectScopes}'s namespace chain, so {@link #collectVariables} can tell it
+     * apart from a raw {@code NameSpace} — which still reports its whole parent chain, for expanding a
+     * closure's captured scope as a single value rather than as a list of levels.
+     */
+    private static final class ScopeLevel {
+        final Object namespace;
+
+        ScopeLevel(Object namespace) {
+            this.namespace = namespace;
+        }
     }
 
     /**
@@ -1055,7 +1089,9 @@ public final class BshHook {
         List<String[]> children = new ArrayList<>();
         List<Object> values = new ArrayList<>();
         try {
-            if (isNameSpace(target)) {
+            if (target instanceof ScopeLevel) {
+                collectNamespaceLevel(((ScopeLevel) target).namespace, children, values);
+            } else if (isNameSpace(target)) {
                 collectNamespace(target, children, values);
             } else if (isThis(target)) {
                 // Expand a This as the scope it stands for, not as a Java object. Its Java fields are
@@ -1345,6 +1381,31 @@ public final class BshHook {
                 }
             }
             namespace = nameSpaceGetParent.invoke(namespace);
+        }
+    }
+
+    /**
+     * Variables declared directly in one namespace — not its parent's, unlike {@link
+     * #collectNamespace}. Used for a {@link ScopeLevel} handle, where the parent is already its own
+     * separate level in {@link #collectScopes}'s list; walking past it here would report it twice.
+     */
+    private static void collectNamespaceLevel(Object namespace, List<String[]> children, List<Object> values)
+            throws Exception {
+        Object names = nameSpaceGetVariableNames.invoke(namespace);
+        if (!(names instanceof String[])) {
+            return;
+        }
+        for (String name : (String[]) names) {
+            if (name == null || name.equals("bsh")) {
+                continue;
+            }
+            Object value;
+            try {
+                value = nameSpaceGetVariable.invoke(namespace, name);
+            } catch (Throwable t) {
+                value = "<unavailable>";
+            }
+            add(children, values, name, value);
         }
     }
 
